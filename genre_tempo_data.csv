@@ -1,0 +1,61 @@
+Genre,ID,music_tempo
+Break,mBR0,80
+Break,mBR1,90
+Break,mBR2,100
+Break,mBR3,110
+Break,mBR4,120
+Break,mBR5,130
+Pop,mPO0,80
+Pop,mPO1,90
+Pop,mPO2,100
+Pop,mPO3,110
+Pop,mPO4,120
+Pop,mPO5,130
+Lock,mLO0,80
+Lock,mLO1,90
+Lock,mLO2,100
+Lock,mLO3,110
+Lock,mLO4,120
+Lock,mLO5,130
+Middle Hip-hop,mMH0,80
+Middle Hip-hop,mMH1,90
+Middle Hip-hop,mMH2,100
+Middle Hip-hop,mMH3,110
+Middle Hip-hop,mMH4,120
+Middle Hip-hop,mMH5,130
+LA style Hip-hop,mLH0,80
+LA style Hip-hop,mLH1,90
+LA style Hip-hop,mLH2,100
+LA style Hip-hop,mLH3,110
+LA style Hip-hop,mLH4,120
+LA style Hip-hop,mLH5,130
+House,mHO0,110
+House,mHO1,115
+House,mHO2,120
+House,mHO3,125
+House,mHO4,130
+House,mHO5,135
+Waack,mWA0,80
+Waack,mWA1,90
+Waack,mWA2,100
+Waack,mWA3,110
+Waack,mWA4,120
+Waack,mWA5,130
+Krump,mKR0,80
+Krump,mKR1,90
+Krump,mKR2,100
+Krump,mKR3,110
+Krump,mKR4,120
+Krump,mKR5,130
+Street Jazz,mJS0,80
+Street Jazz,mJS1,90
+Street Jazz,mJS2,100
+Street Jazz,mJS3,110
+Street Jazz,mJS4,120
+Street Jazz,mJS5,130
+Ballet Jazz,mJB0,80
+Ballet Jazz,mJB1,90
+Ballet Jazz,mJB2,100
+Ballet Jazz,mJB3,110
+Ballet Jazz,mJB4,120
+Ballet Jazz,mJB5,130
