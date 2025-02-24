@@ -4,9 +4,9 @@ from scipy.signal import find_peaks
 from scipy.signal import butter, filtfilt
 from scipy.signal import savgol_filter, argrelmax
 
-def main_two_sensor(sensorA_velocity, sensorB_velocity,
+def main_two_sensor(sensorA_velocity, sensorB_velocity, 
                     mocap_fps, window_size, hop_size, tempi_range, 
-                    T_filter= 0.25, smooth_wlen= 10, pk_order = 15, mode= "zero_uni"):
+                    T_filter= 0.25, smooth_wlen= 10, pk_order = 15, vel_mode = "on",mode= "zero_uni"):
     # to used for any combincation of two sensors or two body markers
 
     novelty_length = len(sensorA_velocity)
@@ -14,6 +14,10 @@ def main_two_sensor(sensorA_velocity, sensorB_velocity,
     if mode== "zero_uni":
         sensorA_abs_vel = smooth_velocity(sensorA_velocity, abs="no", window_length = smooth_wlen, polyorder = 0)
         sensorB_abs_vel = smooth_velocity(sensorB_velocity, abs="no", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
+        if vel_mode == "on":
+            sensorA_abs_vel = np.diff(sensorA_abs_vel, axis=0)    # velocity
+            sensorB_abs_vel = np.diff(sensorB_abs_vel, axis=0)    # velocity
+        
         sensorA_abs_vel[sensorA_abs_vel < 0] = 0
         sensorB_abs_vel[sensorB_abs_vel < 0] = 0
         
@@ -24,6 +28,10 @@ def main_two_sensor(sensorA_velocity, sensorB_velocity,
     elif mode == "zero_bi":
         sensorA_abs_vel = smooth_velocity(sensorA_velocity, abs="yes", window_length = smooth_wlen, polyorder = 0)
         sensorB_abs_vel = smooth_velocity(sensorB_velocity, abs="yes", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
+        
+        if vel_mode == "on":
+            sensorA_abs_vel = np.diff(sensorA_abs_vel, axis=0)    # velocity
+            sensorB_abs_vel = np.diff(sensorB_abs_vel, axis=0)    # velocity
         
         sensorA_dir_change = velocity_based_novelty(sensorA_abs_vel, order=pk_order)    # size (n, 3)   binary
         sensorB_dir_change = velocity_based_novelty(sensorB_abs_vel, order=pk_order)    # size (n, 3)   binary
@@ -73,21 +81,24 @@ def main_two_sensor(sensorA_velocity, sensorB_velocity,
     return json_tempodata
 
 
-def main_one_sensor_peraxis(sensor_velocity, mocap_fps, window_size, 
+def main_one_sensor_peraxis(sensor_position, mocap_fps, window_size, 
                             hop_size, tempi_range, T_filter=0.25, 
-                            smooth_wlen= 100, pk_order = 30,mode = "zero"):
+                            smooth_wlen= 100, pk_order = 30,vel_mode="on",mode = "zero"):
     # to used for any combincation of two sensors or two body markers
     sensor_dir_change = None
     sensor_dir_change_f = None
     sensor_onsets = None  
-    novelty_length = len(sensor_velocity)
+    novelty_length = len(sensor_position)
     
     if mode == 'zero_uni':          # Extract uni-directional change onsets
         
-        sensor_abs_vel = smooth_velocity(sensor_velocity, abs="no", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
-        sensor_abs_vel[sensor_abs_vel < 0] = 0
+        sensor_abs_pos = smooth_velocity(sensor_position, abs="no", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
+        if vel_mode == "on":
+            sensor_abs_pos = np.diff(sensor_abs_pos, axis=0)    # velocity
         
-        sensor_dir_change = velocity_based_novelty(sensor_abs_vel, order= pk_order)    # size (n, 3)
+        sensor_abs_pos[sensor_abs_pos < 0] = 0
+        
+        sensor_dir_change = velocity_based_novelty(sensor_abs_pos, order= pk_order)    # size (n, 3)
         sensor_onsets = filter_dir_onsets_by_threshold(sensor_dir_change, threshold_s= T_filter)
         
         tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onsets, mocap_fps, 
@@ -95,9 +106,11 @@ def main_one_sensor_peraxis(sensor_velocity, mocap_fps, window_size,
 
     elif mode == 'zero_bi':         # Extract bi-directional change onsets
         
-        sensor_abs_vel = smooth_velocity(sensor_velocity, abs="yes", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
+        sensor_abs_pos = smooth_velocity(sensor_position, abs="yes", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
+        if vel_mode == "on":
+            sensor_abs_pos = np.diff(sensor_abs_pos, axis=0)   # velocity
         
-        sensor_dir_change = velocity_based_novelty(sensor_abs_vel, order=pk_order)    # size (n, 3)
+        sensor_dir_change = velocity_based_novelty(sensor_abs_pos, order=pk_order)    # size (n, 3)
         sensor_onsets = filter_dir_onsets_by_threshold(sensor_dir_change, threshold_s= T_filter)
         
         tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onsets, mocap_fps, 
@@ -114,7 +127,7 @@ def main_one_sensor_peraxis(sensor_velocity, mocap_fps, window_size,
                                                    novelty_length, window_size, hop_size, tempi_range)
 
     json_tempodata = {
-        "sensor_abs_vel": sensor_abs_vel,
+        "sensor_abs_vel": sensor_abs_pos,
         "sensor_dir_change_onsets": sensor_dir_change,
         "sensor_dir_change_onsets_f": sensor_dir_change_f,
         "sensor_onsets": sensor_onsets,

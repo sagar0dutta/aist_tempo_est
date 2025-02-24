@@ -1,0 +1,11 @@
+Agenre_name,Ahand_hits_2S,Atotal,Apercentage,Bgenre_name,Bfoot_hits_2S,Btotal,Bpercentage
+Break,11.0,99.0,11.11,Break,10,99,10.1
+House,58.0,136.0,42.65,House,66,136,48.53
+Street Jazz,5.0,129.0,3.88,Ballet Jazz,2,136,1.47
+Krump,20.0,137.0,14.6,Street Jazz,3,129,2.33
+LA style Hip-hop,8.0,141.0,5.67,Krump,14,137,10.22
+Lock,7.0,141.0,4.96,LA style Hip-hop,14,141,9.93
+Middle Hip-hop,9.0,140.0,6.43,Lock,7,141,4.96
+Pop,5.0,141.0,3.55,Middle Hip-hop,16,140,11.43
+Waack,9.0,141.0,6.38,Pop,6,141,4.26
+,,,,Waack,5,141,3.55

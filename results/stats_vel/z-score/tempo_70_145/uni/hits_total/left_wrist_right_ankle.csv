@@ -1,0 +1,9 @@
+hit_type,label,hit,percentage,method
+foot1S_hits,Right Foot,541,40.34,1S
+hand1S_hits,Left Hand,681,50.78,1S
+combined1S_hits,Left Hand+Right Foot,861,64.21,1S
+common1S_hits,Mutual,361,26.92,1S
+foot2S_hits,Both Feet,418,31.17,2S
+hand2S_hits,Both Hand,539,40.19,2S
+combined2S_hits,Both Hand+Foot,682,50.86,2S
+common2S_hits,Mutual,275,20.51,2S
