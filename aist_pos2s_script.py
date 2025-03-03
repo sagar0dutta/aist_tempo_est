@@ -8,7 +8,7 @@ from scipy import stats
 import matplotlib.pyplot as plt
 from compute_tempo_aist import *
 
-def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename):
+def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename, vel_mode = "off"):
 
     result = {
         "filename": [],
@@ -126,18 +126,18 @@ def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename):
             
             tempo_json = main_two_sensor(sensorA_position_norm.reshape(-1,1), sensorB_position_norm.reshape(-1,1),  
                                         mocap_fps, window_size, hop_size, tempi_range,
-                                        T_filter= 0.25, smooth_wlen= 10, pk_order = 15, vel_mode = "on", mode=mode)
+                                        T_filter= 0.25, smooth_wlen= 10, pk_order = 15, vel_mode = vel_mode, mode=mode)
         
             tempo_data_maxmethod = tempo_json["tempo_data_maxmethod"]
             bpmA_arr = tempo_data_maxmethod["bpm_arr"]
             tempo_A = np.round(np.average(bpmA_arr), 2)
             bpm_axes.append(bpmA_arr)
             
-            mode_x = stats.mode(bpmA_arr.flatten())[0]
-            mode_y = stats.mode(bpmA_arr.flatten())[0]
+            mode = stats.mode(bpmA_arr.flatten())[0]
+            # mode_y = stats.mode(bpmA_arr.flatten())[0]
 
-            median_x = np.median(bpmA_arr.flatten())
-            median_y = np.median(bpmA_arr.flatten())
+            median = np.median(bpmA_arr.flatten())
+            # median_y = np.median(bpmA_arr.flatten())
 
             
             if ax == 0:
@@ -150,18 +150,18 @@ def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename):
                 result["choreo_id"].append(choreo_id)
                 result["music_tempo"].append(aist_tempo[music_id])
                 
-                result["mode_x"].append(mode_x)
-                result["mode_y"].append(mode_y)
-
-                
-                result["median_x"].append(median_x)
-                result["median_y"].append(median_y)
-
-                
+                result["mode_x"].append(mode)
+                result["median_x"].append(median)
                 result["X_a"].append(tempo_A)
 
             elif ax == 1:
+                result["mode_y"].append(mode)
+                result["median_y"].append(median)
                 result["Y_a"].append(tempo_A)
+                
+
+                
+
 
         bpm_axes_arr = np.column_stack(bpm_axes)    # n by 3 array
         bpm_mode = stats.mode(bpm_axes_arr.flatten())[0]

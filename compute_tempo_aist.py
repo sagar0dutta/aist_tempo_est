@@ -83,11 +83,10 @@ def main_two_sensor(sensorA_velocity, sensorB_velocity,
 
 def main_one_sensor_peraxis(sensor_position, mocap_fps, window_size, 
                             hop_size, tempi_range, T_filter=0.25, 
-                            smooth_wlen= 100, pk_order = 30,vel_mode="on",mode = "zero"):
+                            smooth_wlen= 100, pk_order = 30, vel_mode="on", mode = "zero_uni"):
     # to used for any combincation of two sensors or two body markers
     sensor_dir_change = None
-    sensor_dir_change_f = None
-    sensor_onsets = None  
+    sensor_onsets = None
     novelty_length = len(sensor_position)
     
     if mode == 'zero_uni':          # Extract uni-directional change onsets
@@ -120,26 +119,25 @@ def main_one_sensor_peraxis(sensor_position, mocap_fps, window_size,
     tempo_data_maxmethod = dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, mocap_fps, 
                                                    novelty_length, window_size, hop_size, tempi_range)
     
-    tempo_data_weightedkernel = dance_beat_tempo_estimation_weightedkernelmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                 novelty_length, window_size, hop_size, tempi_range)
+    # tempo_data_weightedkernel = dance_beat_tempo_estimation_weightedkernelmethod(tempogram_ab, tempogram_raw, mocap_fps, 
+    #                                              novelty_length, window_size, hop_size, tempi_range)
     
-    tempo_data_topN = dance_beat_tempo_estimation_topN(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                   novelty_length, window_size, hop_size, tempi_range)
+    # tempo_data_topN = dance_beat_tempo_estimation_topN(tempogram_ab, tempogram_raw, mocap_fps, 
+    #                                                novelty_length, window_size, hop_size, tempi_range)
 
     json_tempodata = {
-        "sensor_abs_vel": sensor_abs_pos,
-        "sensor_dir_change_onsets": sensor_dir_change,
-        "sensor_dir_change_onsets_f": sensor_dir_change_f,
-        "sensor_onsets": sensor_onsets,
+        "sensor_abs": sensor_abs_pos,   # array
+        "sensor_dir_change_onsets": sensor_dir_change,  # array
+        "sensor_onsets": sensor_onsets,     # array
 
-        "tempogram_ab": tempogram_ab,
-        "tempogram_raw": tempogram_raw,
-        "time_axis_seconds": time_axis_seconds,
-        "tempo_axis_bpm": tempo_axis_bpm,
+        # "tempogram_ab": tempogram_ab,
+        # "tempogram_raw": tempogram_raw,
+        # "time_axis_seconds": time_axis_seconds,
+        # "tempo_axis_bpm": tempo_axis_bpm,
         
-        "tempo_data_maxmethod": tempo_data_maxmethod,
-        "tempo_data_weightedkernel": tempo_data_weightedkernel,
-        "tempo_data_topN": tempo_data_topN,
+        "tempo_data_maxmethod": tempo_data_maxmethod,   # dict
+        # "tempo_data_weightedkernel": tempo_data_weightedkernel,
+        # "tempo_data_topN": tempo_data_topN,
     }
     
     return json_tempodata
@@ -628,7 +626,6 @@ def dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, sampling_
     json_data = {"estimated_beat_pulse": estimated_beat_pulse,
                  "tempo_curve": tempo_curve,
                  "tempo_curve_time_axis": tempo_curve_taxis,
-                #  "global_tempo_bpm": global_bpm,
                  "mag_arr": np.array(mag_list),
                  "bpm_arr": np.array(bpm_list),}
 
