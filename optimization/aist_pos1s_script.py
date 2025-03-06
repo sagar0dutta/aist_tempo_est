@@ -11,7 +11,7 @@ marker_dict = {9: "left_wrist", 10: "right_wrist",
                 15: "left_ankle", 16: "right_ankle", 
                 }   # 11: "left_hip",12: "right_hip"
 
-def aist_pos1s(a,b, mode, markerA_id, csv_filename, w_sec, vel_mode = "on"):
+def aist_pos1s(a,b, mode, markerA_id, csv_filename, w_sec, h_sec, vel_mode = "off"):
 
     result = {
         "filename": [],
@@ -50,7 +50,7 @@ def aist_pos1s(a,b, mode, markerA_id, csv_filename, w_sec, vel_mode = "on"):
     mocap_fps = 60
     tempi_range = np.arange(a,b,1)   # good: 70,145 
     skipped_list = []
-    for idx, filename in enumerate(tqdm(aist_filelist)):
+    for idx, filename in enumerate(aist_filelist):
         
         file_path = os.path.join(f_path, filename)
         file_info = filename.split("_")
@@ -78,9 +78,15 @@ def aist_pos1s(a,b, mode, markerA_id, csv_filename, w_sec, vel_mode = "on"):
         markerA_y = detrend_signal_array(markerA_y.reshape(-1, 1), cutoff= 1, fs=60)
         markerA_pos = np.concatenate((markerA_x, markerA_y), axis=1)  # size (n,2)
         
-        # duration = int(len(markerA_x)/60)
+        duration = int(len(markerA_x)/60)
+        
+        if w_sec > duration:
+            w_sec = duration
+            # print("w_sec greater than duration")
+            # continue 
+        
         # w_sec = int(duration)
-        h_sec = (w_sec/4)       # int removed
+        # h_sec = (w_sec/4)       # int removed
         window_size = int(mocap_fps*w_sec)
         hop_size = int(mocap_fps*h_sec)
         
@@ -154,7 +160,7 @@ def aist_pos1s(a,b, mode, markerA_id, csv_filename, w_sec, vel_mode = "on"):
         
     results_df = pd.DataFrame(result)
     results_df.to_csv(csv_filename, index=False)   # saves final bpms
-    print(f"Results saved to {csv_filename}")
+    # print(f"Results saved to {csv_filename}")
     # print("Skipped:", skipped_list)
     
 def save_to_pickle(savepath, filename, json_tempodata):
