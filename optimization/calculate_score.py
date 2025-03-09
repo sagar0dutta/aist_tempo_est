@@ -6,7 +6,7 @@ from dance_evaluation import *
 from collections import defaultdict
 
 
-def calc_score(mode, read_path, save_path):
+def calc_score(mode, read_path, save_path, tol_type = "abs", tolerance = 8):
 
 
     # root_dir = f"aist_pos1s/tempo_{a}_{b}"
@@ -41,10 +41,10 @@ def calc_score(mode, read_path, save_path):
     
     results = defaultdict(list)
 
-    tolerance = 8
+    
     for exp_name, data in experiments.items():
         for axis_name, calculated in zip(axes, data):
-            metrics, hits_idx, hits_dbl_idx, hits_hf_idx = calculate_metrics_with_oe(ref, calculated, tolerance = tolerance)
+            metrics, hits_idx, hits_dbl_idx, hits_hf_idx = calculate_metrics_with_oe(ref, calculated, tol_type = tol_type, tolerance = tolerance)
             
             results["mode"].append(mode)
             results["axis"].append(axis_name)
