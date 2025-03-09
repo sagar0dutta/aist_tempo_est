@@ -17,7 +17,7 @@ genre_dict = {
     "mJB4": "Ballet Jazz", "mJB5": "Ballet Jazz"
 }
 
-def calculate_metrics_with_oe(ref, calculated, tolerance=5):
+def calculate_metrics_with_oe(ref, calculated, tol_type = "abs", tolerance=5):
     """
     Calculate Acc1, Acc2, Metric3, OE1, and OE2.
     Args:
@@ -27,8 +27,11 @@ def calculate_metrics_with_oe(ref, calculated, tolerance=5):
     Returns:
         dict: Dictionary with Acc1, Acc2, Metric3, OE1, and OE2 values.
     """
-    # ref_tolerance = ref * tolerance
-    ref_tolerance = tolerance
+ 
+    if tol_type == "rel":
+        ref_tolerance = ref * (tolerance/100)
+    elif tol_type == "abs":
+        ref_tolerance = tolerance
     
     # Acc1: Within 4% of reference BPM
     acc1_count = np.sum(np.abs(calculated - ref) <= ref_tolerance)
