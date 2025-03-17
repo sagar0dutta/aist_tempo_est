@@ -8,7 +8,11 @@ from scipy import stats
 import matplotlib.pyplot as plt
 from compute_tempo_aist import *
 
-def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename, vel_mode = "off"):
+marker_dict = {9: "left_wrist", 10: "right_wrist", 
+                15: "left_ankle", 16: "right_ankle", 
+                }   # 11: "left_hip",12: "right_hip"
+
+def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename, savepath, w_sec = 5, vel_mode = "off"):
 
     result = {
         "filename": [],
@@ -20,16 +24,20 @@ def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename, vel_mode = "off"
         "choreo_id": [],
         "music_tempo": [],
 
-        "X_a": [],
-        "Y_a": [],
+        "estimated_bpm_per_window_x":[],
+        "estimated_bpm_per_window_y":[],
+        
+        "bpm_avg_x": [],
+        "bpm_avg_y": [],
+        "bpm_avg_xy":[],
+        
+        "bpm_mode_x": [],
+        "bpm_mode_y": [],
+        "bpm_mode_xy": [],
 
-        "bpm_mode": [],
-        "bpm_median": [],
-        "mode_x": [],
-        "mode_y": [],
-
-        "median_x": [],
-        "median_y": [],
+        "bpm_median_x": [],
+        "bpm_median_y": [],
+        "bpm_median_xy": [],
     }
 
     json_filename = "music_id_tempo.json"
@@ -40,18 +48,7 @@ def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename, vel_mode = "off"
     aist_filelist = os.listdir(f_path)
 
     mocap_fps = 60
-    # a = 60; b =180
     tempi_range = np.arange(a,b,1)   # good: 70,145 
-
-    # marker_dict = {9: "left_wrist", 10: "right_wrist", 
-    #             15: "left_ankle", 16: "right_ankle", 
-    #             11: "left_hip",12: "right_hip"}
-    # sub_dir = "hips" 
-    # mode = "zero_bi" 
-    # markerA_id = 11
-    # markerB_id = 12
-    # csv_filename = f"./results/aist_pos2s/tempo_{a}_{b}/{sub_dir}/{sub_dir}_{mode}_{a}_{b}.csv"        
-
 
     for idx, filename in enumerate(tqdm(aist_filelist)):
         
@@ -87,8 +84,8 @@ def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename, vel_mode = "off"
         
         
         
-        duration = int(len(markerA_x)/60)
-        w_sec = int(duration)
+        # duration = int(len(markerA_x)/60)
+        # w_sec = int(duration)
         h_sec = int(w_sec/4)
         window_size = int(mocap_fps*w_sec)
         hop_size = int(mocap_fps*h_sec)
@@ -130,14 +127,11 @@ def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename, vel_mode = "off"
         
             tempo_data_maxmethod = tempo_json["tempo_data_maxmethod"]
             bpmA_arr = tempo_data_maxmethod["bpm_arr"]
-            tempo_A = np.round(np.average(bpmA_arr), 2)
+            tempo_avg_ax = np.round(np.average(bpmA_arr), 2)     # mean
             bpm_axes.append(bpmA_arr)
             
-            mode = stats.mode(bpmA_arr.flatten())[0]
-            # mode_y = stats.mode(bpmA_arr.flatten())[0]
-
-            median = np.median(bpmA_arr.flatten())
-            # median_y = np.median(bpmA_arr.flatten())
+            mode_ax = stats.mode(bpmA_arr.flatten())[0]        # 
+            median_ax = np.median(bpmA_arr.flatten())
 
             
             if ax == 0:
@@ -150,32 +144,44 @@ def aist_pos2s(a,b, mode, markerA_id, markerB_id, csv_filename, vel_mode = "off"
                 result["choreo_id"].append(choreo_id)
                 result["music_tempo"].append(aist_tempo[music_id])
                 
-                result["mode_x"].append(mode)
-                result["median_x"].append(median)
-                result["X_a"].append(tempo_A)
+                result["estimated_bpm_per_window_x"].append(bpmA_arr)
+                result["bpm_avg_x"].append(tempo_avg_ax)
+                result["bpm_mode_x"].append(mode_ax)
+                result["bpm_median_x"].append(median_ax)
 
             elif ax == 1:
-                result["mode_y"].append(mode)
-                result["median_y"].append(median)
-                result["Y_a"].append(tempo_A)
-                
+                result["estimated_bpm_per_window_y"].append(bpmA_arr)
+                result["bpm_avg_y"].append(tempo_avg_ax)
+                result["bpm_mode_y"].append(mode_ax)
+                result["bpm_median_y"].append(median_ax)
 
-                
-
+            # Save tenpo data
+            save_to_pickle(savepath, f"ax{ax}/{marker_dict[markerA_id]}_{mode}_{filename}", tempo_json)
 
         bpm_axes_arr = np.column_stack(bpm_axes)    # n by 3 array
         bpm_mode = stats.mode(bpm_axes_arr.flatten())[0]
         bpm_median = np.median(bpm_axes_arr.flatten())
-        result["bpm_mode"].append(bpm_mode)
-        result["bpm_median"].append(bpm_median)    
+        bpm_mean = np.mean(bpm_axes_arr.flatten())
         
-        # if idx == 6:
-        #     break    
+        result["bpm_avg_xy"].append(bpm_mean)
+        result["bpm_mode_xy"].append(bpm_mode)
+        result["bpm_median_xy"].append(bpm_median)    
+        
         
     results_df = pd.DataFrame(result)
-
-    results_df.to_csv(csv_filename, index=False)
-    print(f"Results saved to {csv_filename}")         
+    results_df.to_csv(csv_filename, index=False)   # saves final bpms
+    print(f"Results saved to {csv_filename}")
 
     
+def save_to_pickle(savepath, filename, json_tempodata):
+    """Save json_tempodata as a Pickle (.pkl) file."""
+    filepath = os.path.join(savepath, filename)
+    with open(filepath, "wb") as f:
+        pickle.dump(json_tempodata, f)
 
+def load_from_pickle(savepath, filename):
+    """Load json_tempodata from a Pickle (.pkl) file."""
+    filepath = os.path.join(savepath, filename)
+    with open(filepath, "rb") as f:
+        json_tempodata = pickle.load(f)
+    return json_tempodata
