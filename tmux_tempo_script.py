@@ -69,7 +69,7 @@ def body_tempo_estimation(a, b, mode, metric, w_sec, h_sec, save_dir):
     hop_size = int(fps*h_sec)
     tempi_range = np.arange(a,b,1)      # tempo step size
     count= 0
-    for idx, filename in enumerate(aist_filelist):
+    for idx, filename in enumerate(tqdm(aist_filelist)):
         
         file_info = filename.split("_")
         dance_genre = file_info[0] 
@@ -135,7 +135,7 @@ def body_tempo_estimation(a, b, mode, metric, w_sec, h_sec, save_dir):
                     "bothhand_xy": bothhand_xy, "bothfoot_xy": bothfoot_xy,
                     
                     "left_hand_x": left_hand_x[key], "right_hand_x": right_hand_x[key], 
-                    "left_hand_y": left_hand_x[key], "right_hand_y": right_hand_x[key],
+                    "left_hand_y": left_hand_y[key], "right_hand_y": right_hand_y[key],
                     
                     "left_foot_x": left_foot_x[key], "right_foot_x": right_foot_x[key],
                     "left_foot_y": left_foot_y[key], "right_foot_y": right_foot_y[key],
@@ -149,7 +149,7 @@ def body_tempo_estimation(a, b, mode, metric, w_sec, h_sec, save_dir):
             
             sensor_onsets = binary_to_peak(seg, peak_duration=0.05)
             
-            tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onsets, fps, 
+            tempogram_ab, tempogram_raw, _, _ = compute_tempogram(sensor_onsets, fps, 
                                                                             window_length=window_size, hop_size=hop_size, tempi=tempi_range)
             
 
@@ -160,7 +160,7 @@ def body_tempo_estimation(a, b, mode, metric, w_sec, h_sec, save_dir):
             estimated_bpm_per_window = tempo_data_maxmethod["bpm_arr"]
             magnitude_per_window = tempo_data_maxmethod["mag_arr"]
             
-            tempo_avg = np.round(np.average(estimated_bpm_per_window), 2)     # mean
+            tempo_avg = np.round(np.average(estimated_bpm_per_window), 2)         # mean
             tempo_mode = stats.mode(estimated_bpm_per_window.flatten())[0]        # 
             tempo_median = np.median(estimated_bpm_per_window.flatten())
 
