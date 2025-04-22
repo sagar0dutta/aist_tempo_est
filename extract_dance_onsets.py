@@ -5,13 +5,13 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from scipy import stats
-from compute_tempo_aist import *
+from compute_tempo import *
 
 marker_dict = {9: "left_wrist", 10: "right_wrist", 
                 15: "left_ankle", 16: "right_ankle", 
                 }   # 11: "left_hip",12: "right_hip"
 
-def extract_body_onsets(mode, markerA_id, savepath, vel_mode = "off"):
+def extract_body_onsets(mode, markerA_id, savepath, h_thres = 0.2, vel_mode = "off"):
 
     fps = 60
     f_path = "./aist_dataset/aist_annotation/keypoints2d"
@@ -58,27 +58,27 @@ def extract_body_onsets(mode, markerA_id, savepath, vel_mode = "off"):
             markerA_ax = markerA_pos_norm.reshape(-1,1)
                 
             
-            bodysegment_onsets_data = extract_dance_onset(markerA_ax, fps, T_filter=0.25, 
+            bodysegment_onsets_data = extract_dance_onset(markerA_ax, T_filter=0.25, 
                                                             smooth_wlen= 10, pk_order = 15, 
-                                                            remove_pk_thres=0.10, rel_height=0.5,
-                                                            mov_avg_winsz = 10,
+                                                            remove_pk_thres=0.10, height_thres=h_thres,
+                                                            mov_avg_winsz = 10, fps = fps,
                                                             vel_mode= vel_mode, mode = mode)
 
             # Save body segment onsets
             save_to_pickle(savepath, f"ax{ax}/{marker_dict[markerA_id]}_{mode}_{filename}", bodysegment_onsets_data)
         
         resultant_norm = resultant_norm.reshape(-1,1)
-        resultant_onsets_data = extract_resultant_dance_onset(resultant_norm, T_filter=0.20, 
+        resultant_onsets_data = extract_resultant_dance_onset(resultant_norm, T_filter=0.25, 
                                                             smooth_wlen= 10, pk_order = 30,
-                                                            remove_pk_thres=0.10, rel_height=0.5,
+                                                            remove_pk_thres=0.10, height_thres=h_thres,
                                                             mov_avg_winsz = 10, fps =60,
                                                             vel_mode= vel_mode)    
     
         save_to_pickle(savepath, f"resultant/{marker_dict[markerA_id]}_{mode}_{filename}", resultant_onsets_data)
 
-def extract_dance_onset(sensor_data, T_filter=0.20, 
+def extract_dance_onset(sensor_data, T_filter=0.25, 
                         smooth_wlen= 10, pk_order = 30,
-                        remove_pk_thres=0.10, rel_height=0.5,
+                        remove_pk_thres=0.10, height_thres=0.2,
                         mov_avg_winsz = 10, fps =60,
                         vel_mode="off", mode = "zero_uni"):
     # to used for any combincation of two sensors or two body markers
@@ -93,11 +93,16 @@ def extract_dance_onset(sensor_data, T_filter=0.20,
         
         sensor_abs_pos[sensor_abs_pos < 0] = 0
         
-        # new update: peak filtering and moving average
-        sensor_abs_pos_filtered = remove_low_peaks(sensor_abs_pos.flatten(), remove_pk_thres, rel_height)
-        sensor_abs_pos_filtered = moving_average(sensor_abs_pos_filtered, mov_avg_winsz)
+        # Energy part dance tempo estimation
+        sensor_abs_pos_energy = sensor_abs_pos**2
+        del_energy = np.diff(sensor_abs_pos_energy, axis=0)             # Energy based novelty function
+        del_energy[del_energy < 0] = 0                                  # half wave rectification
         
-        sensor_dir_change = velocity_based_novelty(sensor_abs_pos_filtered.reshape(-1,1), order= pk_order)    # size (n, 3)
+        del_energy_movavg = moving_average(del_energy.flatten(), mov_avg_winsz)
+        del_energy_norm = min_max_normalize_1D(del_energy_movavg.flatten())     # normalize 0-1
+        
+        sensor_dir_change = velocity_based_novelty(del_energy_norm.reshape(-1,1), height = height_thres, distance=15)    # size (n, 3)
+        
         sensor_onsets = filter_dir_onsets_by_threshold(sensor_dir_change, threshold_s= T_filter, fps=fps)
         sensor_onsets_50ms = binary_to_peak(sensor_onsets, peak_duration=0.05)
   
@@ -108,18 +113,24 @@ def extract_dance_onset(sensor_data, T_filter=0.20,
         if vel_mode == "on":
             sensor_abs_pos = np.diff(sensor_abs_pos, axis=0)   # velocity
         
-        # new update: peak filtering and moving average
-        sensor_abs_pos_filtered = remove_low_peaks(sensor_abs_pos.flatten(), remove_pk_thres, rel_height)
-        sensor_abs_pos_filtered = moving_average(sensor_abs_pos_filtered, mov_avg_winsz)
+        # Energy part
+        sensor_abs_pos_energy = sensor_abs_pos**2
+        del_energy = np.diff(sensor_abs_pos_energy, axis=0)
+        del_energy[del_energy < 0] = 0
         
-        sensor_dir_change = velocity_based_novelty(sensor_abs_pos_filtered.reshape(-1,1), order=pk_order)    # size (n, 3)
+        del_energy_movavg = moving_average(del_energy.flatten(), mov_avg_winsz)
+        del_energy_norm = min_max_normalize_1D(del_energy_movavg.flatten())
+
+        sensor_dir_change = velocity_based_novelty(del_energy_norm.reshape(-1,1), height = height_thres, distance=15)    # size (n, 3)
+        
         sensor_onsets = filter_dir_onsets_by_threshold(sensor_dir_change, threshold_s= T_filter, fps=fps)
         sensor_onsets_50ms = binary_to_peak(sensor_onsets, peak_duration=0.05)
 
     json_data = {
         "raw_signal": sensor_data,
         "sensor_abs": sensor_abs_pos,   # array
-        "sensor_abs_pos_filtered": sensor_abs_pos_filtered,   # array
+        'del_energy_norm': del_energy_norm,
+        "sensor_abs_pos_filtered": del_energy_movavg,   # array
         "sensor_dir_change_onsets": sensor_dir_change,  # array
         "sensor_onsets": sensor_onsets,     # array
         "sensor_onsets_50ms": sensor_onsets_50ms,     # array
@@ -130,7 +141,7 @@ def extract_dance_onset(sensor_data, T_filter=0.20,
 
 def extract_resultant_dance_onset(resultant_data, T_filter=0.20, 
                         smooth_wlen= 10, pk_order = 30,
-                        remove_pk_thres=0.10, rel_height=0.5,
+                        remove_pk_thres=0.10, height_thres=0.2,
                         mov_avg_winsz = 10, fps =60,
                         vel_mode="off"):
 
@@ -141,10 +152,10 @@ def extract_resultant_dance_onset(resultant_data, T_filter=0.20,
         resultant_smooth = np.diff(resultant_smooth, axis=0)    # velocity
     
     # new update: peak filtering and moving average
-    resultant_filtered = remove_low_peaks(resultant_smooth.flatten(), remove_pk_thres, rel_height)
-    resultant_filtered = moving_average(resultant_filtered, mov_avg_winsz)
+    # resultant_filtered = remove_low_peaks(resultant_smooth.flatten(), remove_pk_thres, rel_height)
+    resultant_filtered = moving_average(resultant_smooth.flatten(), mov_avg_winsz)
     
-    resultant_dir_change = velocity_based_novelty(resultant_filtered.reshape(-1,1), order= pk_order)    # size (n, 3)
+    resultant_dir_change = velocity_based_novelty(resultant_filtered.reshape(-1,1), height = height_thres, distance=15)    # size (n, 3)
     resultant_onsets = filter_dir_onsets_by_threshold(resultant_dir_change, threshold_s= T_filter, fps=fps)
     resultant_onsets_50ms = binary_to_peak(resultant_onsets, peak_duration=0.05)
 
@@ -158,6 +169,8 @@ def extract_resultant_dance_onset(resultant_data, T_filter=0.20,
     }
     return json_data
 
+def min_max_normalize_1D(data):
+    return (data - np.min(data)) / (np.max(data) - np.min(data))
 
 def save_to_pickle(savepath, filename, json_tempodata):
     filepath = os.path.join(savepath, filename)

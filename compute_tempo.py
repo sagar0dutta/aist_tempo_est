@@ -1,412 +1,29 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, peak_widths
 from scipy.signal import butter, filtfilt
-from scipy.signal import savgol_filter, argrelmin
-
-def main_two_sensor(sensorA_velocity, sensorB_velocity, sensorA_position, sensorB_position,
-                    mocap_fps, window_size, hop_size, tempi_range, 
-                    distance_threshold=0.015, T_filter= 0.25, mode= "zero_uni"):
-    # to used for any combincation of two sensors or two body markers
-    
-  
-    # velocity smoothing
-    sensorA_abs_vel = smooth_velocity(sensorA_velocity, abs='yes', window_length = 60, polyorder = 0) # size (n, 3)
-    sensorB_abs_vel = smooth_velocity(sensorB_velocity, abs='yes', window_length = 60, polyorder = 0)   # size (n, 3)
-    novelty_length = len(sensorA_velocity)
-    
-    # Extract directional change onsets
-    sensorA_dir_change = velocity_based_novelty(sensorA_abs_vel, distance_threshold=distance_threshold)    # size (n, 3)   binary
-    sensorB_dir_change = velocity_based_novelty(sensorB_abs_vel, distance_threshold=distance_threshold)    # size (n, 3)   binary    
-
-    if mode== "zero_uni":
-        sensorA_dir_change_f = filter_velocity_by_position(sensorA_position, sensorA_dir_change)    # keep one direction only
-        sensorB_dir_change_f = filter_velocity_by_position(sensorB_position, sensorB_dir_change)    # new update
-        sensorA_sensorB_dir_change = sensorA_dir_change_f + sensorB_dir_change_f    # Merge axis wise
-    elif mode == "zero_bi":
-        sensorA_sensorB_dir_change = sensorA_dir_change + sensorB_dir_change    # Merge axis wise
-
-    
-    # sensorA_sensorB_dir_change = sensorA_dir_change + sensorB_dir_change      # Merge axis wise
-    sensorA_sensorB_dir_change = np.where(sensorA_sensorB_dir_change > 0, 1,0)    # make onset values to 1
-    both_sensor_onsets = filter_dir_onsets_by_threshold(sensorA_sensorB_dir_change, threshold_s= T_filter)   # Filter onsets axis wise 
-    
-    both_sensor_onsets = binary_to_peak(both_sensor_onsets, peak_duration=0.05)
-    
-    print("Computing tempograms...")
-    tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(both_sensor_onsets, mocap_fps, 
-                                                                window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-    
-    print("Computing max method...")
-    tempo_data_maxmethod = dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                   novelty_length, window_size, hop_size, tempi_range)
-    print("Computing weighted method...")
-    tempo_data_weightedkernel = dance_beat_tempo_estimation_weightedkernelmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                 novelty_length, window_size, hop_size, tempi_range)
-    # print("Computing combined method...")
-    # tempo_data_combinedtempogram = dance_beat_tempo_estimation_combinedtempogram_method([tempogram_ab[0]+tempogram_ab[1]+tempogram_ab[2]], 
-                                                                                    # [tempogram_raw[0]+tempogram_raw[1]+tempogram_raw[2]], 
-                                                                                    # mocap_fps, novelty_length, window_size, hop_size, tempi_range)
-    tempo_data_combinedtempogram = None
-    
-    json_tempodata = {
-        "sensorA_abs_vel": sensorA_abs_vel, 
-        "sensorB_abs_vel": sensorB_abs_vel,
-        "sensorA_dir_change": sensorA_dir_change, 
-        "sensorB_dir_change": sensorB_dir_change,
-        # "sensorA_dir_change_f": sensorA_dir_change_f, 
-        # "sensorB_dir_change_f": sensorB_dir_change_f,
-
-        "sensorAB_onsets": both_sensor_onsets,
-        
-        "tempogram_ab": tempogram_ab,
-        "tempogram_raw": tempogram_raw,
-        "time_axis_seconds": time_axis_seconds,
-        "tempo_axis_bpm": tempo_axis_bpm,
-        
-        "tempo_data_maxmethod": tempo_data_maxmethod,
-        "tempo_data_weightedkernel": tempo_data_weightedkernel,
-        "tempo_data_combinedtempogram": tempo_data_combinedtempogram
-    }
-    
-    return json_tempodata
-
-def get_peak_onsets(sensorA_velocity_ax, height= 0.02, distance = None, percentile = 40):
-    
-    peaks_temp, _ = find_peaks(sensorA_velocity_ax.flatten(), height= height, distance= distance)
-    peak_values = sensorA_velocity_ax[peaks_temp]
-    h_cutoff = np.percentile(peak_values, percentile)
-
-    peaks, _ = find_peaks(sensorA_velocity_ax.flatten(), height= h_cutoff, prominence= h_cutoff)
-    peak_onset = np.zeros(len(sensorA_velocity_ax))
-    peak_onset[peaks] = 1
-    
-    return peak_onset.reshape(-1,1)
-
-def main_two_sensor_feet(sensorA_velocity_znorm, sensor_position,both_sensor_onsets, mocap_fps, window_size, 
-                         hop_size, tempi_range, mode="peak_uni", ax=2):
-    
-    novelty_length = len(both_sensor_onsets)
-    
-    # uni directional peak onsets
-    if mode == 'zero_uni':          # Extract uni-directional change onsets
-        sensorA_velocity_ax = sensorA_velocity_znorm[:, ax].reshape(-1,1)
-        sensorA_position_ax = sensor_position[:, ax].reshape(-1,1)
-        
-        sensor_abs_vel = smooth_velocity(sensorA_velocity_ax, abs="yes", window_length = 60, polyorder = 0) # size (n, 3)
-        sensor_dir_change = velocity_based_novelty(sensor_abs_vel, distance_threshold=0.015, time_threshold=0, vel_threshold= 0.05)    # size (n, 3)
-        sensor_dir_change_f = filter_velocity_by_position(sensorA_position_ax, sensor_dir_change)   # uni direction filter
-        sensor_onset = filter_dir_onsets_by_threshold(sensor_dir_change_f, threshold_s= 0.25)
-
-        # tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onsets, mocap_fps, 
-        #                                                                 window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-    
-    elif mode == 'zero_bi':         # Extract bi-directional change onsets 
-        sensorA_velocity_ax = sensorA_velocity_znorm[:, ax].reshape(-1,1)   
-        sensor_abs_vel = smooth_velocity(sensorA_velocity_ax, abs="yes", window_length = 60, polyorder = 0) # size (n, 3)
-        sensor_dir_change = velocity_based_novelty(sensor_abs_vel, distance_threshold=0.015, time_threshold=0, vel_threshold= 0.05)    # size (n, 3)
-        sensor_onset = filter_dir_onsets_by_threshold(sensor_dir_change, threshold_s= 0.25)
-        
-        # tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onsets, mocap_fps, 
-        #                                                             window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-    
-    elif mode== "peak_uni":
-        sensor_abs_vel = smooth_velocity(sensorA_velocity_znorm, abs="no", window_length = 60, polyorder = 0 ) # size (n, 3)
-        sensor_abs_vel[sensor_abs_vel < 0] = 0
-        sensorA_velocity_mmnorm = min_max_normalize(sensor_abs_vel)     # normalize between 0-1
-        sensorA_velocity_ax = sensorA_velocity_mmnorm[:, ax]
-        sensor_onset = get_peak_onsets(sensorA_velocity_ax, percentile= 40, distance= 50)
-        
-    # bi directional peak onsets
-    elif mode== "peak_bi":
-        sensor_abs_vel = smooth_velocity(sensorA_velocity_znorm, abs="yes", window_length = 60, polyorder = 0 ) # size (n, 3)
-        sensorA_velocity_mmnorm = min_max_normalize(sensor_abs_vel)
-        sensorA_velocity_ax = sensorA_velocity_mmnorm[:, ax]
-        sensor_onset = get_peak_onsets(sensorA_velocity_ax, percentile= 40)
-
-    # using both foot onsets
-    elif mode=="zero_bothfeet":
-        sensor_onset = both_sensor_onsets
-        
-        
-    print("Computing tempograms...")
-    tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onset, mocap_fps, 
-                                                        window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-    print("Computing max method...")
-    tempo_data_maxmethod = dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                   novelty_length, window_size, hop_size, tempi_range)
-    print("Computing weighted method...")
-    tempo_data_weightedkernel = dance_beat_tempo_estimation_weightedkernelmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                 novelty_length, window_size, hop_size, tempi_range)
-    # print("Computing combined method...")
-    # tempo_data_combinedtempogram = dance_beat_tempo_estimation_combinedtempogram_method([tempogram_ab[0]+tempogram_ab[1]+tempogram_ab[2]], 
-    #                                                                                 [tempogram_raw[0]+tempogram_raw[1]+tempogram_raw[2]], 
-    #                                                                                 mocap_fps, novelty_length, window_size, hop_size, tempi_range)
-    
-    json_tempodata = {
-        "feet_sensor_onsets": both_sensor_onsets,
-        
-        "tempogram_ab": tempogram_ab,
-        "tempogram_raw": tempogram_raw,
-        "time_axis_seconds": time_axis_seconds,
-        "tempo_axis_bpm": tempo_axis_bpm,
-        
-        "tempo_data_maxmethod": tempo_data_maxmethod,
-        "tempo_data_weightedkernel": tempo_data_weightedkernel,
-
-    }
-    
-    return json_tempodata
+from scipy.signal import savgol_filter, argrelmax
 
 
-def main_one_sensor(sensor_velocity, sensor_position, mocap_fps, window_size, 
-                    hop_size, tempi_range, distance_threshold=0.1, vel_thres = 0.05, mode='zero_bi'):
-    # to used for any combincation of two sensors or two body markers
-    sensor_dir_change = None
-    sensor_dir_change_f = None
-    sensor_onsets = None    
-    novelty_length = len(sensor_velocity)
-    # sensor_abs_vel[sensor_abs_vel<0] = 0
-    
-    if mode == 'zero_uni':          # Extract uni-directional change onsets    
-        sensor_abs_vel = smooth_velocity(sensor_velocity, abs="yes", window_length = 60, polyorder = 0) # size (n, 3)
-        sensor_dir_change = velocity_based_novelty(sensor_abs_vel, distance_threshold=distance_threshold, time_threshold=0, vel_threshold= vel_thres)    # size (n, 3)
-        sensor_dir_change_f = filter_velocity_by_position(sensor_position, sensor_dir_change)   # uni direction filter
-        sensor_onsets = filter_dir_onsets_by_threshold(sensor_dir_change_f, threshold_s= 0.25)
-
-        tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onsets, mocap_fps, 
-                                                                        window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-    
-    elif mode == 'zero_bi':         # Extract bi-directional change onsets    
-        sensor_abs_vel = smooth_velocity(sensor_velocity, abs="yes", window_length = 60, polyorder = 0) # size (n, 3)
-        sensor_dir_change = velocity_based_novelty(sensor_abs_vel, distance_threshold=distance_threshold, time_threshold=0, vel_threshold= vel_thres)    # size (n, 3)
-        sensor_onsets = filter_dir_onsets_by_threshold(sensor_dir_change, threshold_s= 0.25)
-        
-        tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onsets, mocap_fps, 
-                                                                    window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-    
-    elif mode == 'p1':              # using continuous velocity positive peaks
-        sensor_abs_vel = smooth_velocity(sensor_velocity, abs="no", window_length = 60, polyorder = 0) # size (n, 3)
-        sensor_abs_vel[sensor_abs_vel<0] = 0
-        tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_abs_vel, mocap_fps, 
-                                                                     window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-    
-    elif mode == 'p2':              # using continuous velocity absolute positive/negative peaks
-        sensor_abs_vel = smooth_velocity(sensor_velocity, abs="yes", window_length = 60, polyorder = 0) # size (n, 3)
-        tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_abs_vel, mocap_fps, 
-                                                                     window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-        
-    tempo_data_maxmethod = dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                   novelty_length, window_size, hop_size, tempi_range)
-    
-    tempo_data_weightedkernel = dance_beat_tempo_estimation_weightedkernelmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                 novelty_length, window_size, hop_size, tempi_range)
-    
-    tempo_data_combinedtempogram = dance_beat_tempo_estimation_combinedtempogram_method([tempogram_ab[0]+tempogram_ab[1]+tempogram_ab[2]], 
-                                                                                    [tempogram_raw[0]+tempogram_raw[1]+tempogram_raw[2]], 
-                                                                                    mocap_fps, novelty_length, window_size, hop_size, tempi_range)
-    
-    json_tempodata = {
-        "sensor_abs_vel": sensor_abs_vel,
-        "sensor_dir_change": sensor_dir_change,
-        "tempogram_ab": tempogram_ab,
-        "tempogram_raw": tempogram_raw,
-        "time_axis_seconds": time_axis_seconds,
-        "tempo_axis_bpm": tempo_axis_bpm,
-        
-        "tempo_data_maxmethod": tempo_data_maxmethod,
-        "tempo_data_weightedkernel": tempo_data_weightedkernel,
-        "tempo_data_combinedtempogram": tempo_data_combinedtempogram
-    }
-    
-    return json_tempodata
-
-def main_one_sensor_peraxis(sensor_velocity, sensor_position , mocap_fps, window_size, 
-                            hop_size, tempi_range, distance_threshold=0.015, time_threshold=0, 
-                            vel_thres = 0.05, T_filter=0.25, mode = "zero"):
-    # to used for any combincation of two sensors or two body markers
-    sensor_dir_change = None
-    sensor_dir_change_f = None
-    sensor_onsets = None  
-    novelty_length = len(sensor_velocity)
-    
-    if mode == 'zero_uni':          # Extract uni-directional change onsets
-        
-        sensor_abs_vel = smooth_velocity(sensor_velocity, abs="yes", window_length = 60, polyorder = 0) # size (n, 3)
-        sensor_dir_change = velocity_based_novelty(sensor_abs_vel, distance_threshold=distance_threshold, time_threshold=time_threshold, vel_threshold= vel_thres)    # size (n, 3)
-        sensor_dir_change_f = filter_velocity_by_position(sensor_position, sensor_dir_change)
-        sensor_onsets = filter_dir_onsets_by_threshold(sensor_dir_change_f, threshold_s= T_filter)
-        
-        tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onsets, mocap_fps, 
-                                                                    window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-
-    elif mode == 'zero_bi':         # Extract bi-directional change onsets
-        
-        sensor_abs_vel = smooth_velocity(sensor_velocity, abs="yes", window_length = 60, polyorder = 0) # size (n, 3)
-        sensor_dir_change = velocity_based_novelty(sensor_abs_vel, distance_threshold=distance_threshold, time_threshold=time_threshold, vel_threshold= vel_thres)    # size (n, 3)
-        sensor_onsets = filter_dir_onsets_by_threshold(sensor_dir_change, threshold_s= T_filter)
-        
-        tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onsets, mocap_fps, 
-                                                                    window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-    
-    elif mode == 'p1':              # using continuous velocity positive peaks
-        sensor_abs_vel = smooth_velocity(sensor_velocity, abs="no", window_length = 60, polyorder = 0) # size (n, 3)
-        sensor_abs_vel[sensor_abs_vel<0] = 0
-        tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_abs_vel, mocap_fps, 
-                                                                    window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-    
-    elif mode == 'p2':              # using continuous velocity absolute positive/negative peaks 
-        sensor_abs_vel = smooth_velocity(sensor_velocity, abs="yes", window_length = 60, polyorder = 0) # size (n, 3)
-        tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_abs_vel, mocap_fps, 
-                                                                    window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-
-    tempo_data_maxmethod = dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                   novelty_length, window_size, hop_size, tempi_range)
-    
-    tempo_data_weightedkernel = dance_beat_tempo_estimation_weightedkernelmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                 novelty_length, window_size, hop_size, tempi_range)
-    
-    tempo_data_topN = dance_beat_tempo_estimation_topN(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                   novelty_length, window_size, hop_size, tempi_range)
-
-    json_tempodata = {
-        "sensor_abs_vel": sensor_abs_vel,
-        "sensor_dir_change_onsets": sensor_dir_change,
-        "sensor_dir_change_onsets_f": sensor_dir_change_f,
-        "sensor_onsets": sensor_onsets,
-
-        "tempogram_ab": tempogram_ab,
-        "tempogram_raw": tempogram_raw,
-        "time_axis_seconds": time_axis_seconds,
-        "tempo_axis_bpm": tempo_axis_bpm,
-        
-        "tempo_data_maxmethod": tempo_data_maxmethod,
-        "tempo_data_weightedkernel": tempo_data_weightedkernel,
-        "tempo_data_topN": tempo_data_topN,
-    }
-    
-    return json_tempodata
-
-def get_peak_onsets_1S_xyz(sensorA_velocity_ax, height= 0.02, distance = None, percentile = 20, prominence = 0.3):
-    
-    peaks_temp, _ = find_peaks(sensorA_velocity_ax.flatten(), height= height, distance= distance)
-    peak_values = sensorA_velocity_ax[peaks_temp]
-    h_cutoff = np.percentile(peak_values, percentile)
-
-    peaks, _ = find_peaks(sensorA_velocity_ax.flatten(), height= h_cutoff, prominence= prominence)
-    peak_onset = np.zeros(len(sensorA_velocity_ax))
-    peak_onset[peaks] = 1
-    
-    return peak_onset.reshape(-1,1)
-
-
-def main_1S_xyz(sensor_velocity, mocap_fps, window_size, 
-                hop_size, tempi_range):
-    # to used for any combincation of two sensors or two body markers
-
-    novelty_length = len(sensor_velocity)
-
-    # velocity smoothing
-    sensor_abs_vel = smooth_velocity(sensor_velocity, abs="no", window_length = 100, polyorder = 0) # size (n, 3)
-    sensor_onsets = get_peak_onsets_1S_xyz(sensor_abs_vel, height= 0.02, distance = 50, percentile = 20, prominence = 0.3)
-    
-    tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm = compute_tempogram(sensor_onsets, mocap_fps, 
-                                                                window_length=window_size, hop_size=hop_size, tempi=tempi_range)
-    
-    tempo_data_maxmethod = dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                                novelty_length, window_size, hop_size, tempi_range)
-    
-    tempo_data_weightedkernel = dance_beat_tempo_estimation_weightedkernelmethod(tempogram_ab, tempogram_raw, mocap_fps, 
-                                                                novelty_length, window_size, hop_size, tempi_range)
-    
-
-    json_tempodata = {
-        "sensor_abs_vel": sensor_abs_vel,
-
-        "tempogram_ab": tempogram_ab,
-        "tempogram_raw": tempogram_raw,
-        "time_axis_seconds": time_axis_seconds,
-        "tempo_axis_bpm": tempo_axis_bpm,
-        
-        "tempo_data_maxmethod": tempo_data_maxmethod,
-        "tempo_data_weightedkernel": tempo_data_weightedkernel,
-    }
-    
-    return json_tempodata
-
-
-def get_zero_onsets(sensor_velocity, sensor_position, 
-                    distance_threshold=0.1, tcut =0.25, vel_thres = 0.05,):
-
-    # Extract uni-directional change onsets    
-    sensor_abs_vel = smooth_velocity(sensor_velocity, abs="yes", window_length = 60, polyorder = 0) # size (n, 3)
-    sensor_dir_change = velocity_based_novelty(sensor_abs_vel, distance_threshold=distance_threshold, time_threshold=0, vel_threshold= vel_thres)    # size (n, 3)
-    sensor_dir_change_f = filter_velocity_by_position(sensor_position, sensor_dir_change)   # uni direction filter
-    zero_uni_onsets = filter_dir_onsets_by_threshold(sensor_dir_change_f, threshold_s= tcut)
-
-
-    # Extract bi-directional change onsets    
-    sensor_abs_vel1 = smooth_velocity(sensor_velocity, abs="yes", window_length = 60, polyorder = 0) # size (n, 3)
-    sensor_dir_change1 = velocity_based_novelty(sensor_abs_vel1, distance_threshold=distance_threshold, time_threshold=0, vel_threshold= vel_thres)    # size (n, 3)
-    zero_bi_onsets = filter_dir_onsets_by_threshold(sensor_dir_change1, threshold_s= tcut)
-        
-    return zero_uni_onsets, zero_bi_onsets
-    
-    
-def filter_velocity_by_position(sensorA_position, sensor_dir_change_onsets):
+def moving_average(signal, window_size):
     """
-    Filters velocity based onsets using position data
-
+    Compute the moving average of a 1D signal using a specified window size.
+    
     Parameters:
-    - sensorA_position: ndarray, position data of shape (n, 3).
-    - sensor_dir_change_onsets: ndarray, direction change onsets of shape (n, 3).
-    - start_f: int, start frame index.
-    - end_f: int, end frame index.
-
+        signal (array-like): The input 1D signal.
+        window_size (int): The number of samples for the moving average.
+    
     Returns:
-    - new_indices: ndarray of shape (n, 3), with filtered indices for each axis.
+        np.ndarray: The moving average of the signal.
     """
-    new_indices_list = []
+    return np.convolve(signal, np.ones(window_size)/window_size, mode='valid')
 
-    for idx in range(sensorA_position.shape[1]):  # Loop through each axis (0, 1, 2)
-        # Create a binary mask indicating positions greater than 0
-        pos_b = np.where(sensorA_position[:, idx] > 0, 1, 0)
 
-        # Get indices where direction change onset is greater than 0
-        indices = np.where(sensor_dir_change_onsets[:, idx] > 0)[0]
 
-        # Filter indices where the position is also > 0
-        filtered_indices = indices[pos_b[indices] == 1]
-
-        padded_indices = np.zeros(len(sensorA_position))
-        padded_indices[filtered_indices] = 1
-
-        new_indices_list.append(padded_indices)
-
-    # Stack along columns to create an (n, 3) array
-    sensor_dir_change_f = np.column_stack(new_indices_list)
-
-    return sensor_dir_change_f
 
 
 
 def compute_tempogram(dir_change_onset, sampling_rate, window_length, hop_size, tempi=np.arange(30, 121, 1)):
-    """Compute Fourier-based tempogram [FMP, Section 6.2.2]
-
-    Notebook: C6/C6S2_TempogramFourier.ipynb
-
-    Args:
-        signal (np.ndarray): Input signal
-        sampling_rate (scalar): Sampling rate
-        window_length (int): Window length
-        hop_size (int): Hop size
-        tempi (np.ndarray): Set of tempi (given in BPM) (Default value = np.arange(30, 601, 1))
-
-    Returns:
-        tempogram (np.ndarray): Tempogram
-        time_axis_seconds (np.ndarray): Time axis (seconds)
-        tempo_axis_bpm (np.ndarray): Tempo axis (BPM)
-    """
     
     tempogram_raw = []
     tempogram_ab = []
@@ -519,7 +136,8 @@ def dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, sampling_
 
 
     Args:
-        tempogram (np.ndarray): Fourier-based (complex-valued) tempogram
+        tempogram_ab (list): list of arrays of Fourier-based abs tempogram 
+        tempogram_raw (list): list of arrays of Fourier-based (complex-valued) tempogram
         sampling_rate (scalar): Sampling rate
         novelty_length (int): Length of novelty curve
         window_length (int): Window length
@@ -539,7 +157,7 @@ def dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, sampling_
     num_frames = tempogram_raw[0].shape[1]
 
     tempo_curve = np.zeros(padded_curve_length)
-    tempo_curve_taxis = np.linspace(0, novelty_length/240, novelty_length)
+    tempo_curve_taxis = np.linspace(0, novelty_length/sampling_rate, novelty_length)
     prev_freq = None
     mag_list = []
     phase_list = []
@@ -573,43 +191,26 @@ def dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, sampling_
             mag_arr = np.concatenate(( mag_arr, np.array([magnitude]) ))
             phase_arr = np.concatenate(( phase_arr, np.array([phase]) ))
         
-        f_idx = np.argmax(freq_arr)
-        selected_freq = freq_arr[f_idx]
-        selected_bpm = bpm_arr[f_idx]
-        selected_mag = mag_arr[f_idx]
-        selected_phase = phase_arr[f_idx]
+        # f_idx = np.argmax(freq_arr)     # selects the peak frequency for the time window
+        # selected_freq = freq_arr[f_idx]
+        # selected_bpm = bpm_arr[f_idx]
+        # selected_mag = mag_arr[f_idx]
+        # selected_phase = phase_arr[f_idx]
+        
+        m_idx = np.argmax(mag_arr)     # selects the peak magnitude for the time window
+        selected_freq = freq_arr[m_idx]
+        selected_bpm = bpm_arr[m_idx]
+        selected_mag = mag_arr[m_idx]
+        selected_phase = phase_arr[m_idx]
+        
         
         mag_list.append(selected_mag)
         bpm_list.append(selected_bpm)   # bpm per window
         
-        ################################################
-        # margin_bpm = 10        # Small margin for double and half checks (e.g., ±5%)
-        # if prev_freq is not None:
-        #     # Define bounds for double and half frequencies with margin
-        #     lower_double = (2 * prev_freq) - margin_bpm  # Lower bound for double
-        #     upper_double = (2 * prev_freq) + margin_bpm  # Upper bound for double
-        #     lower_half = (prev_freq / 2) - margin_bpm    # Lower bound for half
-        #     upper_half = (prev_freq / 2) + margin_bpm    # Upper bound for half
-
-        #     # Check if selected_freq is close to double or half of prev_freq within the margin
-        #     if (lower_double <= selected_freq <= upper_double):
-        #         selected_freq = prev_freq  # Retain previous frequency
-        #         tempo_curve[time_kernel] = selected_bpm / 2  # Halve the BPM if conditions are met
-            
-        #     elif (lower_half <= selected_freq <= upper_half):
-        #         selected_freq = prev_freq  # Retain previous frequency
-        #         tempo_curve[time_kernel] = selected_bpm * 2  # double the BPM if conditions are met         
-        #     else:
-        #         tempo_curve[time_kernel] = selected_bpm  # Use the full selected BPM
-        # prev_freq = selected_freq       # Update previous frequency to the current value
-        ######################################################
-        
-        # tempo_curve[time_kernel] = selected_bpm
         sinusoidal_kernel = hann_window * np.cos(2 * np.pi * (time_kernel * selected_freq - selected_phase))
         estimated_beat_pulse[time_kernel] += sinusoidal_kernel
 
     tempo_curve = tempo_curve[left_padding:padded_curve_length-right_padding]
-    # global_bpm = np.average(tempo_curve)
     
     estimated_beat_pulse = estimated_beat_pulse[left_padding:padded_curve_length-right_padding]
     estimated_beat_pulse[estimated_beat_pulse < 0] = 0
@@ -617,7 +218,6 @@ def dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, sampling_
     json_data = {"estimated_beat_pulse": estimated_beat_pulse,
                  "tempo_curve": tempo_curve,
                  "tempo_curve_time_axis": tempo_curve_taxis,
-                #  "global_tempo_bpm": global_bpm,
                  "mag_arr": np.array(mag_list),
                  "bpm_arr": np.array(bpm_list),}
 
@@ -648,7 +248,7 @@ def dance_beat_tempo_estimation_topN(tempogram_ab, tempogram_raw, sampling_rate,
     num_frames = tempogram_raw[0].shape[1]
 
     tempo_curve = np.zeros(padded_curve_length)
-    tempo_curve_taxis = np.linspace(0, novelty_length/240, novelty_length)
+    tempo_curve_taxis = np.linspace(0, novelty_length/sampling_rate, novelty_length)
 
 
     freq_all_frames = []
@@ -685,9 +285,7 @@ def dance_beat_tempo_estimation_topN(tempogram_ab, tempogram_raw, sampling_rate,
                 
             freq_arr_axes.append(top_n_freq_arr)
             bpm_arr_axes.append(top_n_bpm_arr) # list of array of top n bpm array for the three axes
-        
-        
-            
+          
         freq_all_frames.append(np.column_stack(freq_arr_axes))
         bpm_all_frames.append(np.column_stack(bpm_arr_axes))
         
@@ -745,7 +343,7 @@ def dance_beat_tempo_estimation_weightedkernelmethod(tempogram_ab, tempogram_raw
     num_frames = tempogram_raw[0].shape[1]
 
     tempo_curve = np.zeros(padded_curve_length)
-    tempo_curve_taxis = np.linspace(0, len(tempo_curve)/240, len(tempo_curve))
+    tempo_curve_taxis = np.linspace(0, len(tempo_curve)/sampling_rate, len(tempo_curve))
     bpm_list = []
     for frame_idx in range(num_frames):
         
@@ -839,7 +437,7 @@ def dance_beat_tempo_estimation_combinedtempogram_method(tempogram_ab, tempogram
     num_frames = tempogram_raw[0].shape[1]
 
     tempo_curve = np.zeros(padded_curve_length)
-    tempo_curve_taxis = np.linspace(0, len(tempo_curve)/240, len(tempo_curve))
+    tempo_curve_taxis = np.linspace(0, len(tempo_curve)/sampling_rate, len(tempo_curve))
     bpm_list = []
     for frame_idx in range(num_frames):
         
@@ -893,64 +491,7 @@ def dance_beat_tempo_estimation_combinedtempogram_method(tempogram_ab, tempogram
 
 
 
-
-
-
-
-def compute_predominant_local_pulse(tempogram, sampling_rate, novelty_length, window_length, hop_size, tempi):
-    """Compute windowed sinusoid with optimal phase
-
-    Notebook: C6/C6S3_PredominantLocalPulse.ipynb
-
-    Args:
-        tempogram (np.ndarray): Fourier-based (complex-valued) tempogram
-        sampling_rate (scalar): Sampling rate
-        novelty_length (int): Length of novelty curve
-        window_length (int): Window length
-        hop_size (int): Hop size
-        tempi (np.ndarray): Set of tempi (given in BPM)
-
-    Returns:
-        predominant_local_pulse (np.ndarray): PLP function
-    """
-    hann_window = np.hanning(window_length)
-    half_window_length = window_length // 2
-    left_padding = half_window_length
-    right_padding = half_window_length
-    padded_novelty_length = novelty_length + left_padding + right_padding
-    predominant_local_pulse = np.zeros(padded_novelty_length)
-    num_frames = tempogram.shape[1]
-    magnitude_tempogram = np.abs(tempogram)
-    
-    tempo_curve = np.zeros(padded_novelty_length)
-    
-    for frame_idx in range(num_frames):
-        # select peak frequency for a time window
-        peak_tempo_idx = np.argmax(magnitude_tempogram[:, frame_idx])
-        peak_tempo_bpm = tempi[peak_tempo_idx]
-        frequency = (peak_tempo_bpm / 60) / sampling_rate
-        
-        # get the complex value for that peak frequency and time window
-        complex_value = tempogram[peak_tempo_idx, frame_idx]
-        phase = - np.angle(complex_value) / (2 * np.pi)
-        
-        
-        start_index = frame_idx * hop_size
-        end_index = start_index + window_length
-        time_kernel = np.arange(start_index, end_index)
-        
-        sinusoidal_kernel = hann_window * np.cos(2 * np.pi * (time_kernel * frequency - phase))
-        predominant_local_pulse[time_kernel] += sinusoidal_kernel
-        
-        tempo_curve[time_kernel] = peak_tempo_bpm
-        
-    predominant_local_pulse = predominant_local_pulse[left_padding:padded_novelty_length-right_padding]
-    predominant_local_pulse[predominant_local_pulse < 0] = 0
-    
-    return predominant_local_pulse, tempo_curve
-
-
-def filter_dir_onsets_by_threshold(dir_change_array, threshold_s=0.25, fps=240):
+def filter_dir_onsets_by_threshold(dir_change_array, threshold_s=0.25, fps=60):
     # Removes any onsets that fall within the threshold window after the current onset
     # dir_change_array is of size (n,3) and is a binary array where onset is represented by value >0
     
@@ -1000,63 +541,77 @@ def smooth_velocity(velocity_data, abs='yes', window_length = 60, polyorder = 0)
             smoothed_velocity = np.abs(smoothed_velocity)
 
         veltemp_list.append(smoothed_velocity)
-
     smooth_vel_arr = np.column_stack(veltemp_list)  # Stacking the list along axis 1 to make an (n, 3) array
     
     return smooth_vel_arr
 
 
-def filter_onsets_by_distance(xyz_ab_minima, xyz_ab, distance_threshold=0.1, time_threshold=0, fps=240):
+# def filter_onsets_by_distance(xyz_ab_minima, xyz_ab, distance_threshold=0.1, time_threshold=0, fps=60):
     
-    # xyz_ab_minima: minima from the velocity data, xyz_ab: velocity data
-    filtered_onsets = []
+#     # xyz_ab_minima: minima from the velocity data, xyz_ab: velocity data
+#     filtered_onsets = []
     
-    # Iterate through the onsets
-    for i in range(len(xyz_ab_minima) - 1):
-        onset_current = xyz_ab_minima[i]
-        onset_next = xyz_ab_minima[i + 1]
+#     # Iterate through the onsets
+#     for i in range(len(xyz_ab_minima) - 1):
+#         onset_current = xyz_ab_minima[i]
+#         onset_next = xyz_ab_minima[i + 1]
         
-        # Calculate the distance between the two onsets (in terms of velocity)
-        distance = np.sum(np.abs(xyz_ab[onset_current:onset_next])) / fps
+#         # Calculate the distance between the two onsets (in terms of velocity)
+#         distance = np.sum(np.abs(xyz_ab[onset_current:onset_next])) / fps
         
-        # Compute time difference in frames
-        time_diff = (onset_next-onset_current)/fps
+#         # Compute time difference in frames
+#         time_diff = (onset_next-onset_current)/fps
         
-        # Apply the distance threshold
-        if distance > distance_threshold and time_diff >= time_threshold:
-            # Keep the next onset
-            filtered_onsets.append(onset_next)
+#         # Apply the distance threshold
+#         if distance > distance_threshold and time_diff >= time_threshold:
+#             # Keep the next onset
+#             filtered_onsets.append(onset_next)
     
-    return np.array(filtered_onsets)
+#     return np.array(filtered_onsets)
 
-def velocity_based_novelty(velocity_array, order=15, distance_threshold=0.02, time_threshold=0, vel_threshold=0.08):
+# def velocity_based_novelty(velocity_array, order=15):
     
-    dir_change_onset_arr = np.array([])
-    onset_data_list = []
+#     dir_change_onset_arr = np.array([])
+#     onset_data_list = []
+#     for i in range(velocity_array.shape[1]):
+        
+#         maxima_indices = argrelmax(velocity_array[:,i], order=order)[0]
+#         binary_onset_data = np.zeros(len(velocity_array[:,i]))
+#         binary_onset_data[maxima_indices] = 1                      # directional change onsets represented by value 1
+
+#         onset_data_list.append(binary_onset_data)
+#     dir_change_onset_arr = np.column_stack(onset_data_list)
+    
+#     return dir_change_onset_arr
+
+##### april 2025
+def velocity_based_novelty(velocity_array, height = 0.2, distance=15):
+    dir_change_onset_arr = []
+    
+    
     for i in range(velocity_array.shape[1]):
+        # Find peaks (local maxima) with a minimum distance between them
         
-        minima_indices = argrelmin(velocity_array[:,i], order=order)[0]
-        filtered_onsets = filter_onsets_by_distance(minima_indices, velocity_array[:,i], distance_threshold=distance_threshold, time_threshold=time_threshold)
-        kept_onsets = filtered_onsets[velocity_array[:,i][filtered_onsets] < vel_threshold]   # keep onsets below a velocity value
-        binary_onset_data = np.zeros(len(velocity_array[:,i]))
-        binary_onset_data[kept_onsets] = 1                      # directional change onsets represented by value 1
+        threshold = height # * np.max(velocity_array[:, i])
+        peaks, _ = find_peaks(velocity_array[:, i], height= threshold, distance=distance)
+        binary_onset_data = np.zeros(len(velocity_array[:, i]))
+        binary_onset_data[peaks] = 1        # directional change onsets represented by 1
+        
+        dir_change_onset_arr.append(binary_onset_data)
 
-        onset_data_list.append(binary_onset_data)
-    dir_change_onset_arr = np.column_stack(onset_data_list)
-    
+    dir_change_onset_arr = np.column_stack(dir_change_onset_arr)
     return dir_change_onset_arr
 
-def detrend_signal(signal, cutoff= 0.5):
-    fs = 240            # Sampling frequency, # Cutoff frequency in Hz     
+
+def detrend_signal(signal, cutoff= 0.5, fs=60):
+    
     b, a = butter(2, cutoff / (fs / 2), btype='highpass')
-
     detrended_signal = filtfilt(b, a, signal) 
-
     return detrended_signal
 
 
-def detrend_signal_array(signal, cutoff= 0.5):
-    fs = 240            # Sampling frequency, # Cutoff frequency in Hz     
+def detrend_signal_array(signal, cutoff= 0.5, fs=60):
+  
     b, a = butter(2, cutoff / (fs / 2), btype='highpass')
     
     detrended_array = np.array([])
@@ -1113,7 +668,7 @@ def min_max_normalize(data):
     normalized_data = (data - min_vals) / (max_vals - min_vals)
     return normalized_data
 
-def binary_to_peak(binary_array, sampling_rate=240, peak_duration=0.05):
+def binary_to_peak(binary_array, sampling_rate=60, peak_duration=0.05):
     """
     Represent binary array with 50ms bandwidth peaks.
 
