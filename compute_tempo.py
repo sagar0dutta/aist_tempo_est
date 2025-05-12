@@ -205,7 +205,7 @@ def dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, sampling_
         
         
         mag_list.append(selected_mag)
-        bpm_list.append(selected_bpm)   # bpm per window
+        bpm_list.append(selected_bpm)   # local tempo bpm per window
         
         sinusoidal_kernel = hann_window * np.cos(2 * np.pi * (time_kernel * selected_freq - selected_phase))
         estimated_beat_pulse[time_kernel] += sinusoidal_kernel
