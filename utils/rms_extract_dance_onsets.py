@@ -6,6 +6,7 @@ import pandas as pd
 from tqdm import tqdm
 from scipy import stats
 from compute_tempo import *
+import librosa
 
 marker_dict = {9: "left_wrist", 10: "right_wrist", 
                 15: "left_ankle", 16: "right_ankle", 
@@ -84,24 +85,29 @@ def extract_dance_onset(sensor_data, T_filter=0.25,
     # to used for any combincation of two sensors or two body markers
     sensor_dir_change = None
     sensor_onsets = None
+    hop_length = 6
+    frame_length = 30
 
     if mode == 'zero_uni':          # Extract uni-directional change onsets
         
         sensor_abs_pos = smooth_velocity(sensor_data, abs="no", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
-        if vel_mode == "on":
-            sensor_abs_pos = np.diff(sensor_abs_pos, axis=0)    # velocity
-        
+
         sensor_abs_pos[sensor_abs_pos < 0] = 0
         
-        # Energy part dance tempo estimation
-        sensor_abs_pos_energy = sensor_abs_pos**2
-        del_energy = np.diff(sensor_abs_pos_energy, axis=0)             # Energy based novelty function
-        del_energy[del_energy < 0] = 0                                  # half wave rectification
+        # sensor_abs_pos = np.square(np.diff(sensor_abs_pos, axis=0) )   # velocity
         
-        del_energy_movavg = moving_average(del_energy.flatten(), mov_avg_winsz)
-        del_energy_norm = min_max_normalize_1D(del_energy_movavg.flatten())     # normalize 0-1
+        rmse = librosa.feature.rms(y=sensor_abs_pos, frame_length=frame_length, hop_length=hop_length).flatten()
+        # rmse_diff = np.zeros_like(rmse)
+        # rmse_diff[1:] = np.diff(rmse)
+        # energy_novelty = np.max([np.zeros_like(rmse_diff), rmse_diff], axis=0)
         
-        sensor_dir_change = velocity_based_novelty(del_energy_norm.reshape(-1,1), height = height_thres, distance=15)    # size (n, 3)
+        rmse_smooth = np.convolve(rmse, np.ones(3)/3, mode='same')  # small moving avg
+        rmse_diff = np.diff(rmse_smooth, prepend=rmse_smooth[0])
+        energy_novelty = np.maximum(0, rmse_diff)
+        
+        
+        sensor_abs_pos_norm = min_max_normalize_1D(energy_novelty.flatten())     # normalize 0-1
+        sensor_dir_change = velocity_based_novelty(sensor_abs_pos_norm.reshape(-1,1), height = height_thres, distance=15)    # size (n, 3)
         
         sensor_onsets = filter_dir_onsets_by_threshold(sensor_dir_change, threshold_s= T_filter, fps=fps)
         sensor_onsets_50ms = binary_to_peak(sensor_onsets, peak_duration=0.05)
@@ -110,18 +116,21 @@ def extract_dance_onset(sensor_data, T_filter=0.25,
     elif mode == 'zero_bi':         # Extract bi-directional change onsets
         
         sensor_abs_pos = smooth_velocity(sensor_data, abs="yes", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
-        if vel_mode == "on":
-            sensor_abs_pos = np.diff(sensor_abs_pos, axis=0)   # velocity
-        
-        # Energy part
-        sensor_abs_pos_energy = sensor_abs_pos**2
-        del_energy = np.diff(sensor_abs_pos_energy, axis=0)
-        del_energy[del_energy < 0] = 0
-        
-        del_energy_movavg = moving_average(del_energy.flatten(), mov_avg_winsz)
-        del_energy_norm = min_max_normalize_1D(del_energy_movavg.flatten())
 
-        sensor_dir_change = velocity_based_novelty(del_energy_norm.reshape(-1,1), height = height_thres, distance=15)    # size (n, 3)
+        # sensor_abs_pos = np.square(np.diff(sensor_abs_pos, axis=0))   # velocity
+        
+        rmse = librosa.feature.rms(y=sensor_abs_pos, frame_length=frame_length, hop_length=hop_length).flatten()
+        # rmse_diff = np.zeros_like(rmse)
+        # rmse_diff[1:] = np.diff(rmse)
+        # energy_novelty = np.max([np.zeros_like(rmse_diff), rmse_diff], axis=0)
+        
+        rmse_smooth = np.convolve(rmse, np.ones(3)/3, mode='same')  # small moving avg
+        rmse_diff = np.diff(rmse_smooth, prepend=rmse_smooth[0])
+        energy_novelty = np.maximum(0, rmse_diff)
+        
+    
+        sensor_abs_pos_norm = min_max_normalize_1D(energy_novelty.flatten())
+        sensor_dir_change = velocity_based_novelty(sensor_abs_pos_norm.reshape(-1,1), height = height_thres, distance=15)    # size (n, 3)
         
         sensor_onsets = filter_dir_onsets_by_threshold(sensor_dir_change, threshold_s= T_filter, fps=fps)
         sensor_onsets_50ms = binary_to_peak(sensor_onsets, peak_duration=0.05)
@@ -129,8 +138,7 @@ def extract_dance_onset(sensor_data, T_filter=0.25,
     json_data = {
         "raw_signal": sensor_data,
         "sensor_abs": sensor_abs_pos,   # array
-        'del_energy_norm': del_energy_norm,
-        "sensor_abs_pos_filtered": del_energy_movavg,   # array
+        'sensor_abs_pos_norm': sensor_abs_pos_norm,
         "sensor_dir_change_onsets": sensor_dir_change,  # array
         "sensor_onsets": sensor_onsets,     # array
         "sensor_onsets_50ms": sensor_onsets_50ms,     # array
@@ -145,15 +153,28 @@ def extract_resultant_dance_onset(resultant_data, T_filter=0.20,
                         mov_avg_winsz = 10, fps =60,
                         vel_mode="off"):
 
-
+    hop_length = 15
+    frame_length = 30
+    
     ########### For resultant of x and y  ##################
     resultant_smooth = smooth_velocity(resultant_data, abs="no", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
-    if vel_mode == "on":
-        resultant_smooth = np.diff(resultant_smooth, axis=0)    # velocity
+    # if vel_mode == "on":
+        # resultant_smooth = np.diff(resultant_smooth, axis=0)    # velocity
     
     # new update: peak filtering and moving average
     # resultant_filtered = remove_low_peaks(resultant_smooth.flatten(), remove_pk_thres, rel_height)
-    resultant_filtered = moving_average(resultant_smooth.flatten(), mov_avg_winsz)
+    rmse = librosa.feature.rms(y=resultant_smooth, frame_length=frame_length, hop_length=hop_length).flatten()
+    # rmse_diff = np.zeros_like(rmse)
+    # rmse_diff[1:] = np.diff(rmse)
+    # energy_novelty = np.max([np.zeros_like(rmse_diff), rmse_diff], axis=0)
+    
+    rmse_smooth = np.convolve(rmse, np.ones(3)/3, mode='same')  # small moving avg
+    rmse_diff = np.diff(rmse_smooth, prepend=rmse_smooth[0])
+    energy_novelty = np.maximum(0, rmse_diff)
+    
+    
+    
+    resultant_filtered = moving_average(energy_novelty.flatten(), mov_avg_winsz)
     
     resultant_dir_change = velocity_based_novelty(resultant_filtered.reshape(-1,1), height = height_thres, distance=15)    # size (n, 3)
     resultant_onsets = filter_dir_onsets_by_threshold(resultant_dir_change, threshold_s= T_filter, fps=fps)

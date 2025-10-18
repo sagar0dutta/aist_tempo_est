@@ -592,7 +592,7 @@ def velocity_based_novelty(velocity_array, height = 0.2, distance=15):
     for i in range(velocity_array.shape[1]):
         # Find peaks (local maxima) with a minimum distance between them
         
-        threshold = height # * np.max(velocity_array[:, i])
+        threshold = height                  # * np.max(velocity_array[:, i])
         peaks, _ = find_peaks(velocity_array[:, i], height= threshold, distance=distance)
         binary_onset_data = np.zeros(len(velocity_array[:, i]))
         binary_onset_data[peaks] = 1        # directional change onsets represented by 1
