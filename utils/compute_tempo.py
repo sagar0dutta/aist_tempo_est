@@ -1,4 +1,5 @@
 import numpy as np
+import pickle
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks, peak_widths
 from scipy.signal import butter, filtfilt
@@ -6,16 +7,6 @@ from scipy.signal import savgol_filter, argrelmax
 
 
 def moving_average(signal, window_size):
-    """
-    Compute the moving average of a 1D signal using a specified window size.
-    
-    Parameters:
-        signal (array-like): The input 1D signal.
-        window_size (int): The number of samples for the moving average.
-    
-    Returns:
-        np.ndarray: The moving average of the signal.
-    """
     return np.convolve(signal, np.ones(window_size)/window_size, mode='valid')
 
 
@@ -63,75 +54,8 @@ def compute_tempogram(dir_change_onset, sampling_rate, window_length, hop_size, 
     return tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm
 
 
-def plot_tempogram(tempo_json, islog= 'no', dpi=200):
 
-    tempogram_ab = tempo_json["tempogram_ab"]
-    time_axis_seconds = tempo_json["time_axis_seconds"]
-    tempo_axis_bpm = tempo_json["tempo_axis_bpm"]
-    # tempogram_ab = np.log(tempogram_ab)
-    # tempogram_ab[0][tempogram_ab[0] <= 50] = 0
-    # tempogram_ab[1][tempogram_ab[1] <= 50] = 0
-    # tempogram_ab[2][tempogram_ab[2] <= 50] = 0
-    
-    if islog == 'yes':
-        tempogram_ab = np.log(tempogram_ab)
-    else:
-        pass
-
-    fig, axs = plt.subplots(1, 4, figsize=(30,6), dpi=dpi)
-
-    # Tempogram X
-    cax1 = axs[0].pcolormesh(time_axis_seconds, tempo_axis_bpm, tempogram_ab[0], shading='auto', cmap='magma')
-    axs[0].set_title('X-axis')
-    axs[0].set_xlabel('Time [s]')
-    axs[0].set_ylabel('Tempo [BPM]')
-    plt.colorbar(cax1, ax=axs[0], orientation='horizontal', label='Magnitude')
-
-    # Tempogram Y
-    cax2 = axs[1].pcolormesh(time_axis_seconds, tempo_axis_bpm, tempogram_ab[1], shading='auto', cmap='magma')
-    axs[1].set_title('Y-axis')
-    axs[1].set_xlabel('Time [s]')
-    plt.colorbar(cax2, ax=axs[1], orientation='horizontal', label='Magnitude')
-
-    # Tempogram Z
-    cax3 = axs[2].pcolormesh(time_axis_seconds, tempo_axis_bpm, tempogram_ab[2], shading='auto', cmap='magma')
-    axs[2].set_title('Z-axis')
-    axs[2].set_xlabel('Time [s]')
-    plt.colorbar(cax3, ax=axs[2], orientation='horizontal', label='Magnitude')
-
-    # Tempogram XYZ
-    cax3 = axs[3].pcolormesh(time_axis_seconds, tempo_axis_bpm, (tempogram_ab[0]+tempogram_ab[1]+tempogram_ab[2]), shading='auto', cmap='magma')
-    axs[3].set_title('XYZ-axis')
-    axs[3].set_xlabel('Time [s]')
-    plt.colorbar(cax3, ax=axs[3], orientation='horizontal', label='Magnitude')
-
-    # plt.suptitle(f'{segment_name} tempograms for the 3 axes')
-    plt.show()
-
-def plot_tempogram_perAxis(tempo_json, islog= 'no', dpi=100):
-
-    tempogram_ab = tempo_json["tempogram_ab"]
-    time_axis_seconds = tempo_json["time_axis_seconds"]
-    tempo_axis_bpm = tempo_json["tempo_axis_bpm"]
-    
-    if islog == 'yes':
-        tempogram_ab = np.log(tempogram_ab)
-    else:
-        pass
-    
-    Tdim = len(tempogram_ab)
-    fig, axs = plt.subplots(1, 1, figsize=(5,5), dpi=dpi)
-
-    for i in range(Tdim):
-        # Tempogram X
-        cax1 = axs.pcolormesh(time_axis_seconds, tempo_axis_bpm, tempogram_ab[i], shading='auto', cmap='magma')
-        axs.set_title(f'{i}-axis')
-        axs.set_xlabel('Time [s]')
-        axs.set_ylabel('Tempo [BPM]')
-        plt.colorbar(cax1, ax=axs, orientation='horizontal', label='Magnitude')
-    plt.show()
-
-def dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, sampling_rate, novelty_length, window_length, hop_size, tempi):
+def dance_tempo_estimation_single(tempogram_ab, tempogram_raw, sampling_rate, novelty_length, window_length, hop_size, tempi):
     """Compute windowed sinusoid with optimal phase
 
 
@@ -150,85 +74,54 @@ def dance_beat_tempo_estimation_maxmethod(tempogram_ab, tempogram_raw, sampling_
 
     hann_window = np.hanning(window_length)
     half_window_length = window_length // 2
-    left_padding = half_window_length
-    right_padding = half_window_length
-    padded_curve_length = novelty_length + left_padding + right_padding
+    padded_curve_length = novelty_length + half_window_length
     estimated_beat_pulse = np.zeros(padded_curve_length)
-    num_frames = tempogram_raw[0].shape[1]
 
-    tempo_curve = np.zeros(padded_curve_length)
-    tempo_curve_taxis = np.linspace(0, novelty_length/sampling_rate, novelty_length)
-    prev_freq = None
-    mag_list = []
-    phase_list = []
-    bpm_list = []
+    num_frames = tempogram_raw.shape[1]
+    bpm_list, mag_list, phase_list = [], [], []
+
+
     for frame_idx in range(num_frames):
+        # strongest tempo bin for current frame
+        peak_idx = np.argmax(tempogram_ab[:, frame_idx])
+        peak_bpm = tempi[peak_idx]
+        frequency = (peak_bpm / 60) / sampling_rate  # Hz → samples
         
-        bpm_arr = np.array([])
-        freq_arr = np.array([])
-        mag_arr = np.array([])
-        phase_arr = np.array([])
+        complex_value = tempogram_raw[peak_idx, frame_idx]
+        phase = -np.angle(complex_value) / (2 * np.pi)
+        magnitude = np.abs(complex_value)
         
-        for i in range(len(tempogram_ab)):  # number of axis = 3 
-        
-            # select peak frequency for a time window
-            peak_tempo_idx = np.argmax(tempogram_ab[i][:, frame_idx])
-            peak_tempo_bpm = tempi[peak_tempo_idx]
-            frequency = (peak_tempo_bpm / 60) / sampling_rate
-            frequency = np.round(frequency, 3)
+        # Reconstruct sinusoidal kernel
+        start_index = frame_idx * hop_size
+        end_index = start_index + window_length
+        time_kernel = np.arange(start_index, end_index)
+        sinusoidal_kernel = hann_window * np.cos(2 * np.pi * (time_kernel * frequency - phase))
 
-            # get the complex value for that peak frequency and time window
-            complex_value = tempogram_raw[i][peak_tempo_idx, frame_idx]
-            phase = - np.angle(complex_value) / (2 * np.pi)
-            magnitude = np.abs(complex_value)
-            
-            start_index = frame_idx * hop_size
-            end_index = start_index + window_length
-            time_kernel = np.arange(start_index, end_index)
-            
-            freq_arr = np.concatenate(( freq_arr, np.array([frequency]) ))
-            bpm_arr = np.concatenate(( bpm_arr, np.array([peak_tempo_bpm]) ))
-            mag_arr = np.concatenate(( mag_arr, np.array([magnitude]) ))
-            phase_arr = np.concatenate(( phase_arr, np.array([phase]) ))
-        
-        # f_idx = np.argmax(freq_arr)     # selects the peak frequency for the time window
-        # selected_freq = freq_arr[f_idx]
-        # selected_bpm = bpm_arr[f_idx]
-        # selected_mag = mag_arr[f_idx]
-        # selected_phase = phase_arr[f_idx]
-        
-        m_idx = np.argmax(mag_arr)     # selects the peak magnitude for the time window
-        selected_freq = freq_arr[m_idx]
-        selected_bpm = bpm_arr[m_idx]
-        selected_mag = mag_arr[m_idx]
-        selected_phase = phase_arr[m_idx]
-        
-        
-        mag_list.append(selected_mag)
-        bpm_list.append(selected_bpm)   # local tempo bpm per window
-        
-        sinusoidal_kernel = hann_window * np.cos(2 * np.pi * (time_kernel * selected_freq - selected_phase))
-        estimated_beat_pulse[time_kernel] += sinusoidal_kernel
+        # Accumulate weighted sinusoid
+        valid_end = min(end_index, padded_curve_length)
+        valid_len = valid_end - start_index
+        if valid_len > 0:
+            estimated_beat_pulse[start_index:valid_end] += magnitude * sinusoidal_kernel[:valid_len]
 
-    tempo_curve = tempo_curve[left_padding:padded_curve_length-right_padding]
-    
-    estimated_beat_pulse = estimated_beat_pulse[left_padding:padded_curve_length-right_padding]
-    estimated_beat_pulse[estimated_beat_pulse < 0] = 0
+        mag_list.append(magnitude)
+        bpm_list.append(peak_bpm)
+        phase_list.append(phase)
+        
 
     json_data = {"estimated_beat_pulse": estimated_beat_pulse,
-                 "tempo_curve": tempo_curve,
-                 "tempo_curve_time_axis": tempo_curve_taxis,
                  "mag_arr": np.array(mag_list),
                  "bpm_arr": np.array(bpm_list),}
 
     return json_data
 
-def dance_beat_tempo_estimation_topN(tempogram_ab, tempogram_raw, sampling_rate, novelty_length, window_length, hop_size, tempi):
+
+def dance_tempo_estimation_multi(tempogram_ab_list, tempogram_raw_list, sampling_rate, novelty_length, window_length, hop_size, tempi):
     """Compute windowed sinusoid with optimal phase
 
 
     Args:
-        tempogram (np.ndarray): Fourier-based (complex-valued) tempogram
+        tempogram_ab (list): list of arrays of Fourier-based abs tempogram 
+        tempogram_raw (list): list of arrays of Fourier-based (complex-valued) tempogram
         sampling_rate (scalar): Sampling rate
         novelty_length (int): Length of novelty curve
         window_length (int): Window length
@@ -241,254 +134,64 @@ def dance_beat_tempo_estimation_topN(tempogram_ab, tempogram_raw, sampling_rate,
 
     hann_window = np.hanning(window_length)
     half_window_length = window_length // 2
-    left_padding = half_window_length
-    right_padding = half_window_length
-    padded_curve_length = novelty_length + left_padding + right_padding
+    padded_curve_length = novelty_length + half_window_length
     estimated_beat_pulse = np.zeros(padded_curve_length)
-    num_frames = tempogram_raw[0].shape[1]
 
-    tempo_curve = np.zeros(padded_curve_length)
-    tempo_curve_taxis = np.linspace(0, novelty_length/sampling_rate, novelty_length)
+    tempogram_data = []
+    # median_tempo_list = []
+    for tempogram_ab, tempogram_raw in zip(tempogram_ab_list, tempogram_raw_list):
 
+        num_frames = tempogram_raw.shape[1]
+        bpm_list,complex_list, mag_list, phase_list = [], [], [], []
 
-    freq_all_frames = []
-    bpm_all_frames = []
-    for frame_idx in range(num_frames):
-        
-        
-        freq_arr_axes = []
-        bpm_arr_axes = []
-        for i in range(len(tempogram_ab)):  # number of axis = 3 
-        
-            n = 10  # Number of top peaks you want
-            peak_tempo_indices = np.argsort(tempogram_ab[i][:, frame_idx])[-n:]  # Indices of top n values, sorted in ascending order
-            peak_tempo_indices = peak_tempo_indices[::-1]  # Reverse to get them in descending order
+        for frame_idx in range(num_frames):
+            # strongest tempo bin for current frame
+            peak_idx = np.argmax(tempogram_ab[:, frame_idx])
+            peak_bpm = tempi[peak_idx]
+            frequency = (peak_bpm / 60) / sampling_rate  # Hz → samples
             
-            top_n_freq_arr = np.array([])
-            top_n_bpm_arr = np.array([])
-            for idx in peak_tempo_indices:  # Iterate over the top n indices
-                peak_tempo_bpm = tempi[idx]
-                frequency = (peak_tempo_bpm / 60) / sampling_rate
-                peak_frequency = np.round(frequency, 3)
-            
-                # Get the complex value for that peak frequency and time window
-                complex_value = tempogram_raw[i][idx, frame_idx]
-                magnitude = np.abs(complex_value)
-                phase = - np.angle(complex_value) / (2 * np.pi)
-            
-                start_index = frame_idx * hop_size
-                end_index = start_index + window_length
-                time_kernel = np.arange(start_index, end_index)
-                
-                top_n_bpm_arr = np.concatenate(( top_n_bpm_arr, np.array([peak_tempo_bpm]) ))
-                top_n_freq_arr = np.concatenate(( top_n_freq_arr, np.array([peak_frequency]) ))
-                
-            freq_arr_axes.append(top_n_freq_arr)
-            bpm_arr_axes.append(top_n_bpm_arr) # list of array of top n bpm array for the three axes
-          
-        freq_all_frames.append(np.column_stack(freq_arr_axes))
-        bpm_all_frames.append(np.column_stack(bpm_arr_axes))
-        
-        frame_bpm = np.column_stack(bpm_arr_axes)
-        top_n_max_bpm = np.argmax(frame_bpm, axis=0)        # 1d array
-
-        # Calculate the weighted BPM and frequency for the top n values
-        top_n_bpm = frame_bpm.flatten()  # Flatten the array for easy manipulation
-        top_n_freq = np.array([bpm / 60 / sampling_rate for bpm in top_n_bpm])
-        top_n_magnitudes = np.abs(tempogram_raw[i][peak_tempo_indices, frame_idx])  # Corresponding magnitudes
-
-        if np.sum(top_n_magnitudes) > 0:
-            # Weighted BPM and frequency
-            weighted_bpm = np.sum(top_n_bpm * top_n_magnitudes) / np.sum(top_n_magnitudes)
-            weighted_freq = np.sum(top_n_freq * top_n_magnitudes) / np.sum(top_n_magnitudes)
-        else:
-            weighted_bpm = 0
-            weighted_freq = 0
-
-        # Use the weighted BPM and frequency for tempo curve and sinusoidal kernel
-        selected_bpm = weighted_bpm
-        selected_freq = weighted_freq
-
-        tempo_curve[time_kernel] = selected_bpm
-        sinusoidal_kernel = hann_window * np.cos(2 * np.pi * (time_kernel * selected_freq - phase))
-        estimated_beat_pulse[time_kernel] += sinusoidal_kernel
-
-    json_data = {"estimated_beat_pulse": estimated_beat_pulse,
-                 "tempo_curve": tempo_curve,
-                 "tempo_curve_time_axis": tempo_curve_taxis,
-                 "bpm_arr": bpm_all_frames,}
-
-    return json_data
-
-def dance_beat_tempo_estimation_weightedkernelmethod(tempogram_ab, tempogram_raw, sampling_rate, novelty_length, window_length, hop_size, tempi):
-    """Overlapping kernels from all axis per frame
-    Args:
-        tempogram (np.ndarray): Fourier-based (complex-valued) tempogram
-        sampling_rate (scalar): Sampling rate
-        novelty_length (int): Length of novelty curve
-        window_length (int): Window length
-        hop_size (int): Hop size
-        tempi (np.ndarray): Set of tempi (given in BPM)
-
-    Returns:
-        predominant_local_pulse (np.ndarray): PLP function
-    """
-
-    hann_window = np.hanning(window_length)
-    half_window_length = window_length // 2
-    left_padding = half_window_length
-    right_padding = half_window_length
-    padded_curve_length = novelty_length + left_padding + right_padding
-    estimated_beat_pulse = np.zeros(padded_curve_length)
-    num_frames = tempogram_raw[0].shape[1]
-
-    tempo_curve = np.zeros(padded_curve_length)
-    tempo_curve_taxis = np.linspace(0, len(tempo_curve)/sampling_rate, len(tempo_curve))
-    bpm_list = []
-    for frame_idx in range(num_frames):
-        
-        bpm_arr = np.array([])
-        magnitude_arr = np.array([])
-        weighted_kernel_sum = np.zeros(window_length)
-        total_weight = 0
-        
-        for i in range(len(tempogram_ab)):  # number of axis = 3 
-        
-            # select peak frequency for a time window
-            peak_tempo_idx = np.argmax(tempogram_ab[i][:, frame_idx])
-            peak_tempo_bpm = tempi[peak_tempo_idx]
-            frequency = (peak_tempo_bpm / 60) / sampling_rate
-            
-            # get the complex value for that peak frequency and time window
-            complex_value = tempogram_raw[i][peak_tempo_idx, frame_idx]
+            complex_value = tempogram_raw[peak_idx, frame_idx]
+            phase = -np.angle(complex_value) / (2 * np.pi)
             magnitude = np.abs(complex_value)
-            phase = - np.angle(complex_value) / (2 * np.pi)
             
+            # Reconstruct sinusoidal kernel
             start_index = frame_idx * hop_size
             end_index = start_index + window_length
             time_kernel = np.arange(start_index, end_index)
-            
-            magnitude_arr = np.concatenate(( magnitude_arr, np.array([magnitude]) ))
-            bpm_arr = np.concatenate(( bpm_arr, np.array([peak_tempo_bpm]) ))     #  
-
             sinusoidal_kernel = hann_window * np.cos(2 * np.pi * (time_kernel * frequency - phase))
-            weighted_kernel_sum += magnitude * sinusoidal_kernel   
-            total_weight += magnitude
 
-        if total_weight > 0:
-            weighted_kernel_sum /= total_weight     # Normalize
+            # Accumulate weighted sinusoid
+            valid_end = min(end_index, padded_curve_length)
+            valid_len = valid_end - start_index
+            if valid_len > 0:
+                estimated_beat_pulse[start_index:valid_end] += magnitude * sinusoidal_kernel[:valid_len]
 
-        estimated_beat_pulse[time_kernel] += weighted_kernel_sum
-
-        if len(bpm_arr) > 0:
-            # selected_bpm = np.max(bpm_arr)          # mean median not good, max is good
-            if np.sum(magnitude_arr) == 0:
-                selected_bpm = 0
-            else:
-                selected_bpm = np.sum(bpm_arr * magnitude_arr) / np.sum(magnitude_arr)
-                tempo_curve[time_kernel] = selected_bpm
-        else:
-            selected_bpm = 0
-        bpm_list.append(selected_bpm)
-        
-    tempo_curve = tempo_curve[left_padding:padded_curve_length-right_padding]
-    
-    estimated_beat_pulse = estimated_beat_pulse[left_padding:padded_curve_length-right_padding]
-    estimated_beat_pulse[estimated_beat_pulse < 0] = 0
-
-    json_data = {"estimated_beat_pulse": estimated_beat_pulse,
-                 "tempo_curve": tempo_curve,
-                 "tempo_curve_time_axis": tempo_curve_taxis,
-                #  "global_tempo_bpm": global_bpm,
-                 "bpm_arr": np.array(bpm_list)}
-    
-        # weighted average BPM for the tempo curve
-        # if np.sum(magnitude_arr) > 0:
-        #     bpm_weighted_sum = np.sum(bpm_arr * magnitude_arr)
-        #     avg_bpm = bpm_weighted_sum / np.sum(magnitude_arr)
-        # else:
-        #     avg_bpm = 0
-        # tempo_curve[time_kernel] = avg_bpm
-        
-        # Using median bpm
-    return json_data
-
-
-def dance_beat_tempo_estimation_combinedtempogram_method(tempogram_ab, tempogram_raw, sampling_rate, novelty_length, window_length, hop_size, tempi):
-    """
-    Args:
-        tempogram (np.ndarray): Fourier-based (complex-valued) tempogram
-        sampling_rate (scalar): Sampling rate
-        novelty_length (int): Length of novelty curve
-        window_length (int): Window length
-        hop_size (int): Hop size
-        tempi (np.ndarray): Set of tempi (given in BPM)
-
-    Returns:
-        predominant_local_pulse (np.ndarray): PLP function
-    """
-
-    hann_window = np.hanning(window_length)
-    half_window_length = window_length // 2
-    left_padding = half_window_length
-    right_padding = half_window_length
-    padded_curve_length = novelty_length + left_padding + right_padding
-    estimated_beat_pulse = np.zeros(padded_curve_length)
-    num_frames = tempogram_raw[0].shape[1]
-
-    tempo_curve = np.zeros(padded_curve_length)
-    tempo_curve_taxis = np.linspace(0, len(tempo_curve)/sampling_rate, len(tempo_curve))
-    bpm_list = []
-    for frame_idx in range(num_frames):
-        
-        bpm_arr = np.array([])
-        freq_arr = np.array([])
-        phase_arr = np.array([])
-        
-        for i in range(len(tempogram_ab)):  # number of axis = 3 
-        
-            # select peak frequency for a time window
-            peak_tempo_idx = np.argmax(tempogram_ab[i][:, frame_idx])
-            peak_tempo_bpm = tempi[peak_tempo_idx]
-            frequency = (peak_tempo_bpm / 60) / sampling_rate
-
-            # get the complex value for that peak frequency and time window
-            complex_value = tempogram_raw[i][peak_tempo_idx, frame_idx]
-            phase = - np.angle(complex_value) / (2 * np.pi)
+            mag_list.append(magnitude)
+            bpm_list.append(peak_bpm)
+            phase_list.append(phase)
+            complex_list.append(complex_value)
             
-            start_index = frame_idx * hop_size
-            end_index = start_index + window_length
-            time_kernel = np.arange(start_index, end_index)
+        median_tempo = np.median(bpm_list)
             
-            freq_arr = np.concatenate(( freq_arr, np.array([frequency]) ))
-            bpm_arr = np.concatenate(( bpm_arr, np.array([peak_tempo_bpm]) ))
-            phase_arr = np.concatenate(( phase_arr, np.array([phase]) ))
-
-        f_idx = np.argmax(freq_arr)
-        selected_freq = freq_arr[f_idx]
-        selected_bpm = bpm_arr[f_idx]
-        selected_phase = phase_arr[f_idx]
-        bpm_list.append(selected_bpm)
         
-        sinusoidal_kernel = hann_window * np.cos(2 * np.pi * (time_kernel * selected_freq - selected_phase))
-        estimated_beat_pulse[time_kernel] += sinusoidal_kernel
+        tempogram_data.append({
+        "magnitude": mag_list,
+        "bpm": bpm_list,
+        "phase": phase_list,
+        "complex": complex_list,
+        "median_tempo": median_tempo
+        })
         
-        tempo_curve[time_kernel] = selected_bpm
         
-    # global_bpm = np.average(tempo_curve)
-        
-    estimated_beat_pulse = estimated_beat_pulse[left_padding:padded_curve_length-right_padding]
-    estimated_beat_pulse[estimated_beat_pulse < 0] = 0
 
-    json_data = {"estimated_beat_pulse": estimated_beat_pulse,
-                 "tempo_curve": tempo_curve,
-                 "tempo_curve_time_axis": tempo_curve_taxis,
-                #  "global_tempo_bpm": global_bpm,
-                 "bpm_array": bpm_list}
+    # json_data = {"estimated_beat_pulse": estimated_beat_pulse,
+    #              "complex_arr": np.array(complex_list),
+    #              "mag_arr": np.array(mag_list),
+    #              "phase_arr": np.array(phase_list),
+    #              "bpm_arr": np.array(bpm_list),
+    #              }
 
-    return json_data
-
-
+    return tempogram_data
 
 
 def filter_dir_onsets_by_threshold(dir_change_array, threshold_s=0.25, fps=60):
@@ -698,3 +401,14 @@ def binary_to_peak(binary_array, sampling_rate=60, peak_duration=0.05):
 
     # Trim to original length
     return continuous_signal[:n].reshape(-1,1)
+
+
+def load_pickle(filepath):
+    with open(filepath, "rb") as f:
+        json_data = pickle.load(f)
+    return json_data
+
+def save_to_pickle(filepath, data):
+    # filepath = os.path.join(savepath, filename)
+    with open(filepath, "wb") as f:
+        pickle.dump(data, f)

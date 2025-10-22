@@ -8,20 +8,21 @@ from scipy import stats
 
 from .compute_tempo import *
 
-marker_dict = {9: "left_wrist", 10: "right_wrist", 
-                15: "left_ankle", 16: "right_ankle", 
-                }   # 11: "left_hip",12: "right_hip"
+marker_dict = {    
+0: "nose", 1: "left_eye", 2: "right_eye", 3: "left_ear",4: "right_ear",5: "left_shoulder",
+6: "right_shoulder",7: "left_elbow",8: "right_elbow",9: "left_wrist",10: "right_wrist",
+11: "left_hip",12: "right_hip",13: "left_knee",14: "right_knee",15: "left_ankle",16: "right_ankle",}  
 
-def extract_body_onsets(mode, markerA_id, savepath, h_thres = 0.2, vel_mode = "off"):
+def extract_body_anchor(mode, markerA_id, savepath, aist2d_dir, fps=60, h_thres = 0.2, vel_mode = "off"):
 
-    fps = 60
-    f_path = "./aist_dataset/aist_annotation/keypoints2d"
-    aist_filelist = os.listdir(f_path)
+    # fps = 60
+    # aist2d_dir = "./aist_dataset/aist_annotation/keypoints2d"
+    aist_filelist = os.listdir(aist2d_dir)
 
     skipped_list = []
     for idx, filename in enumerate(tqdm(aist_filelist)):
         
-        file_path = os.path.join(f_path, filename)
+        file_path = os.path.join(aist2d_dir, filename)
         
         with open(file_path, 'rb') as file:
             motion_data = pickle.load(file)
@@ -59,34 +60,32 @@ def extract_body_onsets(mode, markerA_id, savepath, h_thres = 0.2, vel_mode = "o
             markerA_ax = markerA_pos_norm.reshape(-1,1)
                 
             
-            bodysegment_onsets_data = extract_dance_onset(markerA_ax, T_filter=0.25, 
-                                                            smooth_wlen= 10, pk_order = 15, 
-                                                            remove_pk_thres=0.10, height_thres=h_thres,
-                                                            mov_avg_winsz = 10, fps = fps,
+            bodysegment_onsets_data = detect_segment_anchor(markerA_ax, T_filter=0.25, 
+                                                            smooth_wlen= 10,  height_thres=h_thres,
+                                                            fps = fps,
                                                             vel_mode= vel_mode, mode = mode)
 
             # Save body segment onsets
             save_to_pickle(savepath, f"ax{ax}/{marker_dict[markerA_id]}_{mode}_{filename}", bodysegment_onsets_data)
         
         resultant_norm = resultant_norm.reshape(-1,1)
-        resultant_onsets_data = extract_resultant_dance_onset(resultant_norm, T_filter=0.25, 
-                                                            smooth_wlen= 10, pk_order = 30,
-                                                            remove_pk_thres=0.10, height_thres=h_thres,
+        resultant_onsets_data = detect_resultant_anchor(resultant_norm, T_filter=0.25, 
+                                                            smooth_wlen= 10, 
+                                                            height_thres=h_thres,
                                                             mov_avg_winsz = 10, fps =60,
                                                             vel_mode= vel_mode)    
     
         save_to_pickle(savepath, f"resultant/{marker_dict[markerA_id]}_{mode}_{filename}", resultant_onsets_data)
 
-def extract_dance_onset(sensor_data, T_filter=0.25, 
-                        smooth_wlen= 10, pk_order = 30,
-                        remove_pk_thres=0.10, height_thres=0.2,
-                        mov_avg_winsz = 10, fps =60,
-                        vel_mode="off", mode = "zero_uni"):
+def detect_segment_anchor(sensor_data, T_filter=0.25, 
+                        smooth_wlen= 10,  height_thres=0.2,
+                        fps =60,
+                        vel_mode="off", mode = "uni"):
     # to used for any combincation of two sensors or two body markers
     sensor_dir_change = None
     sensor_onsets = None
 
-    if mode == 'zero_uni':          # Extract uni-directional change onsets
+    if mode == 'uni':          # Extract uni-directional change onsets
         
         sensor_abs_pos = smooth_velocity(sensor_data, abs="no", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
         if vel_mode == "on":
@@ -101,7 +100,7 @@ def extract_dance_onset(sensor_data, T_filter=0.25,
         sensor_onsets_50ms = binary_to_peak(sensor_onsets, peak_duration=0.05)
   
 
-    elif mode == 'zero_bi':         # Extract bi-directional change onsets
+    elif mode == 'bi':         # Extract bi-directional change onsets
         
         sensor_abs_pos = smooth_velocity(sensor_data, abs="yes", window_length = smooth_wlen, polyorder = 0) # size (n, 3)
         if vel_mode == "on":
@@ -125,9 +124,9 @@ def extract_dance_onset(sensor_data, T_filter=0.25,
     }
     return json_data
 
-def extract_resultant_dance_onset(resultant_data, T_filter=0.20, 
-                        smooth_wlen= 10, pk_order = 30,
-                        remove_pk_thres=0.10, height_thres=0.2,
+def detect_resultant_anchor(resultant_data, T_filter=0.20, 
+                        smooth_wlen= 10, 
+                        height_thres=0.2,
                         mov_avg_winsz = 10, fps =60,
                         vel_mode="off"):
 
