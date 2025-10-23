@@ -14,10 +14,10 @@ def moving_average(signal, window_size):
 
 
 
-def compute_tempogram(dir_change_onset, sampling_rate, window_length, hop_size, tempi=np.arange(30, 121, 1)):
+def compute_tempogram(dir_change_onset, sampling_rate, window_length, hop_size, tempi=np.arange(45, 140, 1)):
     
-    tempogram_raw = []
-    tempogram_ab = []
+    # tempogram_raw = []
+    # tempogram_ab = []
     for i in range(dir_change_onset.shape[1]):
         
         hann_window = np.hanning(window_length)
@@ -47,8 +47,8 @@ def compute_tempogram(dir_change_onset, sampling_rate, window_length, hop_size, 
                 end_index = start_index + window_length
                 tempogram[tempo_idx, frame_idx] = np.sum(hann_window * modulated_signal[start_index:end_index])    
                 
-        tempogram_raw.append(tempogram)
-        tempogram_ab.append(np.abs(tempogram))
+        tempogram_raw= tempogram
+        tempogram_ab= np.abs(tempogram)
     # print("Tempograms generated")
  
     return tempogram_ab, tempogram_raw, time_axis_seconds, tempo_axis_bpm
@@ -114,8 +114,122 @@ def dance_tempo_estimation_single(tempogram_ab, tempogram_raw, sampling_rate, no
 
     return json_data
 
+############# Multi Segment ################
 
-def dance_tempo_estimation_multi(tempogram_ab_list, tempogram_raw_list, sampling_rate, novelty_length, window_length, hop_size, tempi):
+# --- Helper functions ---
+def best_alignment(x, f, fps):
+    """Return normalized correlation (−1 to 1) and lag (sec) for x vs sine kernel at freq f."""
+    x = np.asarray(x).flatten()
+    x = x - np.mean(x)
+
+    # Skip empty/constant signals early
+    if np.allclose(x, 0) or np.std(x) < 1e-8:
+        return 0.0, 0.0, np.zeros_like(x), np.arange(len(x)) / fps
+
+    # Reference sinusoid
+    sine = np.sin(2 * np.pi * f * np.arange(len(x)) / fps)
+    sine -= np.mean(sine)
+
+    denom = np.sqrt(np.sum(x**2) * np.sum(sine**2))
+    if denom < 1e-12:  # avoid div-by-zero
+        return 0.0, 0.0, np.zeros_like(x), np.arange(len(x)) / fps
+
+    corr = np.correlate(x, sine, mode="full") / denom
+    lags = np.arange(-len(x) + 1, len(x)) / fps
+
+    best_idx = np.argmax(np.abs(corr))
+    best_corr = float(corr[best_idx])
+    best_lag = float(lags[best_idx])
+    return best_corr, best_lag, corr, lags
+
+
+# def dance_tempo_estimation_multi(tempogram_ab_list, tempogram_raw_list, anchors, fps, novelty_length, window_length, hop_size, tempi):
+#     """Compute windowed sinusoid with optimal phase
+
+
+#     Args:
+#         tempogram_ab (list): list of arrays of Fourier-based abs tempogram 
+#         tempogram_raw (list): list of arrays of Fourier-based (complex-valued) tempogram
+#         sampling_rate (scalar): Sampling rate
+#         novelty_length (int): Length of novelty curve
+#         window_length (int): Window length
+#         hop_size (int): Hop size
+#         tempi (np.ndarray): Set of tempi (given in BPM)
+
+#     Returns:
+#         beat
+#     """
+
+#     hann_window = np.hanning(window_length)
+#     half_window_length = window_length // 2
+#     padded_curve_length = novelty_length + half_window_length
+#     estimated_beat_pulse = np.zeros(padded_curve_length)
+
+#     # tempogram_data = {}
+#     gtempo_list = []
+#     for tempogram_ab, tempogram_raw in zip(tempogram_ab_list, tempogram_raw_list):
+
+#         num_frames = tempogram_raw.shape[1]
+#         bpm_list,complex_list, mag_list, phase_list = [], [], [], []
+
+#         for frame_idx in range(num_frames):
+#             # strongest tempo bin for current frame
+#             peak_idx = np.argmax(tempogram_ab[:, frame_idx])
+#             peak_bpm = tempi[peak_idx]
+#             frequency = (peak_bpm / 60) / fps  # Hz → samples
+            
+#             complex_value = tempogram_raw[peak_idx, frame_idx]
+#             phase = -np.angle(complex_value) / (2 * np.pi)
+#             magnitude = np.abs(complex_value)
+            
+#             # Reconstruct sinusoidal kernel
+#             start_index = frame_idx * hop_size
+#             end_index = start_index + window_length
+#             time_kernel = np.arange(start_index, end_index)
+#             sinusoidal_kernel = hann_window * np.cos(2 * np.pi * (time_kernel * frequency - phase))
+
+#             # Accumulate weighted sinusoid
+#             valid_end = min(end_index, padded_curve_length)
+#             valid_len = valid_end - start_index
+#             if valid_len > 0:
+#                 estimated_beat_pulse[start_index:valid_end] += magnitude * sinusoidal_kernel[:valid_len]
+
+#             mag_list.append(magnitude)
+#             bpm_list.append(peak_bpm)
+#             phase_list.append(phase)
+#             complex_list.append(complex_value)
+            
+#         gtempo_list.append(np.median(bpm_list))    
+        
+#     test_freq = []
+#     for gbpm in gtempo_list:
+#         fq = np.round(gbpm/60, 2)  # in Hz
+#         test_freq.append(fq)
+
+
+#     anchor_names = ["anchor1", "anchor2", "anchor3"]     # TODO
+
+#     results = {name: {} for name in anchor_names}
+#     best_global = {"freq": None, "sensor": None, "corr": 0.0, "lag": None}
+
+#     for f in test_freq:
+#         for name, x in zip(anchor_names, anchors):
+#             best_corr, best_lag, corr, lags = best_alignment(x, f, fps)
+#             results[name][f] = (best_corr, best_lag)
+
+#             if abs(best_corr) > abs(best_global["corr"]):
+#                 best_global.update({"freq": f, "sensor": name, "corr": best_corr, "lag": best_lag})
+    
+#     if best_global['freq'] is None:
+#         gtempo = gtempo_list[-1]  # in BPM
+#     else:    
+#         gtempo = np.round(best_global['freq']*60, 2)  # in BPM
+        
+#     tempogram_data = {"gtempo": gtempo,}
+
+#     return tempogram_data
+
+def dance_tempo_estimation(tempogram_ab_list, tempogram_raw_list, fps, novelty_length, window_length, hop_size, tempi):
     """Compute windowed sinusoid with optimal phase
 
 
@@ -138,7 +252,7 @@ def dance_tempo_estimation_multi(tempogram_ab_list, tempogram_raw_list, sampling
     estimated_beat_pulse = np.zeros(padded_curve_length)
 
     tempogram_data = []
-    # median_tempo_list = []
+    gtempo_list = []
     for tempogram_ab, tempogram_raw in zip(tempogram_ab_list, tempogram_raw_list):
 
         num_frames = tempogram_raw.shape[1]
@@ -148,7 +262,7 @@ def dance_tempo_estimation_multi(tempogram_ab_list, tempogram_raw_list, sampling
             # strongest tempo bin for current frame
             peak_idx = np.argmax(tempogram_ab[:, frame_idx])
             peak_bpm = tempi[peak_idx]
-            frequency = (peak_bpm / 60) / sampling_rate  # Hz → samples
+            frequency = (peak_bpm / 60) / fps  # Hz → samples
             
             complex_value = tempogram_raw[peak_idx, frame_idx]
             phase = -np.angle(complex_value) / (2 * np.pi)
@@ -171,25 +285,17 @@ def dance_tempo_estimation_multi(tempogram_ab_list, tempogram_raw_list, sampling
             phase_list.append(phase)
             complex_list.append(complex_value)
             
-        median_tempo = np.median(bpm_list)
             
-        
+        # gtempo_list.append(np.median(bpm_list))    
         tempogram_data.append({
-        "magnitude": mag_list,
-        "bpm": bpm_list,
-        "phase": phase_list,
-        "complex": complex_list,
-        "median_tempo": median_tempo
-        })
+            "magnitude": mag_list,
+            "bpm": bpm_list,
+            "phase": phase_list,
+            "complex": complex_list,
+            "median_tempo": np.median(bpm_list)
+            })
         
         
-
-    # json_data = {"estimated_beat_pulse": estimated_beat_pulse,
-    #              "complex_arr": np.array(complex_list),
-    #              "mag_arr": np.array(mag_list),
-    #              "phase_arr": np.array(phase_list),
-    #              "bpm_arr": np.array(bpm_list),
-    #              }
 
     return tempogram_data
 
@@ -249,43 +355,6 @@ def smooth_velocity(velocity_data, abs='yes', window_length = 60, polyorder = 0)
     return smooth_vel_arr
 
 
-# def filter_onsets_by_distance(xyz_ab_minima, xyz_ab, distance_threshold=0.1, time_threshold=0, fps=60):
-    
-#     # xyz_ab_minima: minima from the velocity data, xyz_ab: velocity data
-#     filtered_onsets = []
-    
-#     # Iterate through the onsets
-#     for i in range(len(xyz_ab_minima) - 1):
-#         onset_current = xyz_ab_minima[i]
-#         onset_next = xyz_ab_minima[i + 1]
-        
-#         # Calculate the distance between the two onsets (in terms of velocity)
-#         distance = np.sum(np.abs(xyz_ab[onset_current:onset_next])) / fps
-        
-#         # Compute time difference in frames
-#         time_diff = (onset_next-onset_current)/fps
-        
-#         # Apply the distance threshold
-#         if distance > distance_threshold and time_diff >= time_threshold:
-#             # Keep the next onset
-#             filtered_onsets.append(onset_next)
-    
-#     return np.array(filtered_onsets)
-
-# def velocity_based_novelty(velocity_array, order=15):
-    
-#     dir_change_onset_arr = np.array([])
-#     onset_data_list = []
-#     for i in range(velocity_array.shape[1]):
-        
-#         maxima_indices = argrelmax(velocity_array[:,i], order=order)[0]
-#         binary_onset_data = np.zeros(len(velocity_array[:,i]))
-#         binary_onset_data[maxima_indices] = 1                      # directional change onsets represented by value 1
-
-#         onset_data_list.append(binary_onset_data)
-#     dir_change_onset_arr = np.column_stack(onset_data_list)
-    
-#     return dir_change_onset_arr
 
 ##### april 2025
 def velocity_based_novelty(velocity_array, height = 0.2, distance=15):

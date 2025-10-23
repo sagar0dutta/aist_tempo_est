@@ -1,10 +1,15 @@
 import os
+import json
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from scipy import stats
 from .compute_tempo import *
 from .anchor_io import *
+
+with open("music_id_tempo.json", "r") as file:
+    aist_tempo = json.load(file)
+
 
 
 # -------------------------------------------------------------
@@ -113,7 +118,7 @@ def compute_tempo_for_segments(segment_ax, fps, window_size, hop_size, tempi_ran
     for seg_key, seg in segment_ax.items():
         sensor_onsets = binary_to_peak(seg, peak_duration=0.1)
         tempogram_ab, tempogram_raw, _, _ = compute_tempogram(sensor_onsets, fps, window_size, hop_size, tempi_range)
-        tempo_info = dance_tempo_estimation_single(tempogram_ab[0], tempogram_raw[0], fps, novelty_length, window_size, hop_size, tempi_range)
+        tempo_info = dance_tempo_estimation_single(tempogram_ab, tempogram_raw, fps, novelty_length, window_size, hop_size, tempi_range)
 
         bpm_arr = tempo_info["bpm_arr"].flatten()
         tempo_data[seg_key] = {
@@ -124,3 +129,175 @@ def compute_tempo_for_segments(segment_ax, fps, window_size, hop_size, tempi_ran
         }
 
     return tempo_data
+
+
+# -------------------------------------------------------------
+# 6. Main processing loop
+# -------------------------------------------------------------
+def process_all_files(aist_filelist, anchor_type, mode, fps, window_size, hop_size, tempi_range, save_dir):
+    """Master loop to process all files and save per-segment tempo results."""
+    result = {}
+    count = 0
+
+    for filename in tqdm(aist_filelist):
+        paths = get_all_anchor_paths(anchor_type, mode, filename)
+        if not os.path.exists(paths["markers"]["left_wrist"]["ax0"]):
+            continue
+
+        meta = parse_filename(filename)
+        data = load_marker_data(paths)
+        combined = compute_combinations(data, fps, thres=0.2)
+        resultants = load_resultant(paths, thres=0.2, fps=fps)
+
+        segment_ax = {**combined, **resultants}
+        novelty_length = data["left_hand_x"].shape[0]
+
+        tempo_data = compute_tempo_for_segments(segment_ax, fps, window_size, hop_size, tempi_range, novelty_length)
+
+        for seg_key, info in tempo_data.items():
+            if seg_key not in result:
+                result[seg_key] = {k: [] for k in [
+                    "filename", "dance_genre", "situation", "camera_id", "dancer_id",
+                    "music_id", "choreo_id", "music_tempo", "estimated_bpm_per_window",
+                    "magnitude_per_window", "bpm_avg", "bpm_mode", "bpm_median"
+                ]}
+
+            result[seg_key]["filename"].append(filename.replace(".pkl", ""))
+            for k, v in meta.items():
+                result[seg_key][k].append(v)
+            result[seg_key]["music_tempo"].append(aist_tempo[meta["music_id"]])
+            result[seg_key]["estimated_bpm_per_window"].append(info["bpm_arr"])
+            result[seg_key]["magnitude_per_window"].append(info["mag_arr"])
+            result[seg_key]["bpm_avg"].append(info["bpm_avg"])
+            result[seg_key]["bpm_mode"].append(info["bpm_mode"])
+            result[seg_key]["bpm_median"].append(info["bpm_median"])
+
+        count += 1
+
+    print("Total processed:", count)
+    # Save results
+    for seg_key, df_data in result.items():
+        df_seg = pd.DataFrame(df_data)
+        fname = f"{anchor_type}/{seg_key}_{mode}.pkl"
+        df_seg.to_pickle(os.path.join(save_dir, fname))
+       
+
+# -------------------------------------------------------------
+# 7. Tempo computation multi segment
+# -------------------------------------------------------------   
+       
+def compute_tempo_for_multi_segments(multi_segment, fps, window_size, hop_size, tempi_range, novelty_length):
+
+    tempo_data = {}
+
+    for seg_key, segs in multi_segment.items():
+
+        anchors = []
+        tempogram_ab_list = []
+        tempogram_raw_list = []
+
+        for anchor in segs:
+            anchors.append(anchor)  # already binary/peak as you like
+            temp_ab, temp_raw, _, _ = compute_tempogram(anchor, fps, window_size, hop_size, tempi_range)
+            tempogram_ab_list.append(temp_ab)
+            tempogram_raw_list.append(temp_raw)
+
+        # Use your provided function (returns list of dicts, one per anchor)
+        per_anchor = dance_tempo_estimation(
+            tempogram_ab_list, tempogram_raw_list,
+            fps, novelty_length, window_size, hop_size, tempi_range
+        )
+
+        # Build test frequencies (Hz) from anchor-wise median tempos
+        test_frequencies = [np.round(d["median_tempo"] / 60.0, 2) for d in per_anchor]
+        results = {}
+        best_global = {"freq": None, "corr": 0.0, "lag": None}
+
+        for f in test_frequencies:
+            for x in anchors:
+                best_corr, best_lag, corr, lags = best_alignment(x, f, fps)
+                results[f] = (best_corr, best_lag)
+                if abs(best_corr) > abs(best_global["corr"]):
+                    best_global.update({"freq": f, "corr": best_corr, "lag": best_lag})
+
+        # Global tempo in BPM (falls back to anchor median if something odd happens)
+        if best_global["freq"] is None:
+            # Fallback: use the median of medians (close to V1’s spirit)
+            gtempo = float(np.round(np.median([d["median_tempo"] for d in per_anchor]), 2))
+        else:
+            gtempo = float(np.round(best_global["freq"] * 60.0, 2))
+
+        tempo_data[seg_key] = {
+            "gtempo": gtempo,
+            "per_anchor": per_anchor,    # contains "median_tempo", "magnitude", "phase", "complex"
+            "alignment": {
+                "best": best_global,
+                "all": results,
+            },
+        }
+
+    return tempo_data
+ 
+        
+# -------------------------------------------------------------
+# 8. Main processing loop multi segment
+# -------------------------------------------------------------        
+
+def process_all_files_multi_segment(aist_filelist, anchor_type, mode, fps, window_size, hop_size, tempi_range, save_dir):
+    """Master loop to process all files and save per-segment tempo results."""
+    result = {}
+    count = 0
+
+    for filename in tqdm(aist_filelist):
+        paths = get_all_anchor_paths(anchor_type, mode, filename)
+        if not os.path.exists(paths["markers"]["left_wrist"]["ax0"]):
+            continue
+
+        meta = parse_filename(filename)
+        data = load_marker_data(paths)
+        combined = compute_combinations(data, fps, thres=0.2)
+        resultants = load_resultant(paths, thres=0.2, fps=fps)
+
+        segment_ax = {**combined, **resultants}
+        
+        multi_segment = {
+            'bothhand_y_bothfoot_y':          [segment_ax["both_hand_y"], segment_ax["both_foot_y"]],
+            'leftfoot_xy_rightfoot_xy':       [segment_ax["leftfoot_xy"], segment_ax["rightfoot_xy"]],
+            'left_foot_res_right_foot_res':   [segment_ax["left_foot_resultant"], segment_ax["right_foot_resultant"]],
+            'lefthand_xy_righthand_xy':       [segment_ax["lefthand_xy"], segment_ax["righthand_xy"]],
+            'left_hand_res_right_hand_res':   [segment_ax["left_hand_resultant"], segment_ax["right_hand_resultant"]],
+            'bothfoot_x_bothfoot_y':          [segment_ax["both_foot_x"], segment_ax["both_foot_y"]],
+            'bothhand_x_bothfoot_x':          [segment_ax["both_hand_x"], segment_ax["both_foot_x"]],
+            'bothhand_x_bothhand_y':          [segment_ax["both_hand_x"], segment_ax["both_hand_y"]],
+            'both_hand_res_both_foot_res':    [segment_ax["both_hand_resultant"], segment_ax["both_foot_resultant"]],
+            'bothhand_y_bothfoot_y_torso_y':  [segment_ax["both_hand_y"], segment_ax["both_foot_y"], segment_ax["torso_y"]],
+        }
+        
+        novelty_length = data["left_hand_x"].shape[0]
+        # break
+        tempo_data = compute_tempo_for_multi_segments(multi_segment, fps, window_size, hop_size, tempi_range, novelty_length)
+
+        for seg_key, info in tempo_data.items():
+                if seg_key not in result:
+                    result[seg_key] = {k: [] for k in [
+                        "filename", "dance_genre", "situation", "camera_id", "dancer_id",
+                        "music_id", "choreo_id", "music_tempo", "gtempo",
+                    ]}
+
+                result[seg_key]["filename"].append(filename.replace(".pkl", ""))
+                for k, v in meta.items():
+                    result[seg_key][k].append(v)
+                result[seg_key]["music_tempo"].append(aist_tempo[meta["music_id"]])
+                result[seg_key]["gtempo"].append(info["gtempo"])
+
+
+        count += 1
+
+    print("Total processed:", count)
+    # Save results
+    for seg_key, df_data in result.items():
+        df_seg = pd.DataFrame(df_data)
+        sub_dir = f"multi/{anchor_type}/"
+        os.makedirs(os.path.join(save_dir, sub_dir), exist_ok=True)
+        fname= f"{seg_key}_{mode}.pkl"
+        df_seg.to_pickle(os.path.join(save_dir, sub_dir, fname))
