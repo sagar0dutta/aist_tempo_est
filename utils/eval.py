@@ -167,7 +167,7 @@ def compute_dts_bon(
 def evaluation_single(a, b, mode, anchor_type, tolerance=0.13):
 
     segment_keys = [
-                    "torso_y",
+                    "torso_x","torso_y",
                     "left_hand_x", "right_hand_x", "left_hand_y", "right_hand_y",   # singular
                     "left_foot_x", "right_foot_x", "left_foot_y", "right_foot_y",   # singular
                     
@@ -180,6 +180,7 @@ def evaluation_single(a, b, mode, anchor_type, tolerance=0.13):
                     "bothhand_x_bothfoot_x", "bothhand_y_bothfoot_y",
                     "lefthand_xy_righthand_xy", "leftfoot_xy_rightfoot_xy",
                     "bothhand_x_bothhand_y", "bothfoot_x_bothfoot_y", 
+                    "bothhand_y_bothfoot_y_torso_y",
                     ] 
     
     score_data = {}

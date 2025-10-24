@@ -11,7 +11,6 @@ with open("music_id_tempo.json", "r") as file:
     aist_tempo = json.load(file)
 
 
-
 # -------------------------------------------------------------
 # 1. File info extraction
 # -------------------------------------------------------------
@@ -44,6 +43,7 @@ def load_marker_data(paths, key="sensor_onsets"):
         "left_foot_y": lp(paths["markers"]["left_ankle"]["ax1"]),
         "right_foot_x": lp(paths["markers"]["right_ankle"]["ax0"]),
         "right_foot_y": lp(paths["markers"]["right_ankle"]["ax1"]),
+        "torso_x": lp(paths["com"]["com_torso"]["ax0"]),
         "torso_y": lp(paths["com"]["com_torso"]["ax1"]),
     }
 
@@ -56,6 +56,7 @@ def compute_combinations(data, fps, thres):
     f = filter_dir_onsets_by_threshold
     k = "both"
 
+    torso_y = data["torso_y"]
     bothhand_x = f(data["left_hand_x"] + data["right_hand_x"], threshold_s=thres, fps=fps)
     bothhand_y = f(data["left_hand_y"] + data["right_hand_y"], threshold_s=thres, fps=fps)
     bothfoot_x = f(data["left_foot_x"] + data["right_foot_x"], threshold_s=thres, fps=fps)
@@ -78,6 +79,7 @@ def compute_combinations(data, fps, thres):
         "leftfoot_xy_rightfoot_xy": f(leftfoot_xy + rightfoot_xy, threshold_s=thres, fps=fps),
         "bothhand_x_bothhand_y": f(bothhand_x + bothhand_y, threshold_s=thres, fps=fps),
         "bothfoot_x_bothfoot_y": f(bothfoot_x + bothfoot_y, threshold_s=thres, fps=fps),
+        "bothhand_y_bothfoot_y_torso_y": f(bothhand_y + bothfoot_y + torso_y, threshold_s=thres, fps=fps),
     }
 
 
@@ -116,6 +118,7 @@ def compute_tempo_for_segments(segment_ax, fps, window_size, hop_size, tempi_ran
     tempo_data = {}
 
     for seg_key, seg in segment_ax.items():
+
         sensor_onsets = binary_to_peak(seg, peak_duration=0.1)
         tempogram_ab, tempogram_raw, _, _ = compute_tempogram(sensor_onsets, fps, window_size, hop_size, tempi_range)
         tempo_info = dance_tempo_estimation_single(tempogram_ab, tempogram_raw, fps, novelty_length, window_size, hop_size, tempi_range)
@@ -151,7 +154,7 @@ def process_all_files(aist_filelist, anchor_type, mode, fps, window_size, hop_si
 
         segment_ax = {**combined, **resultants}
         novelty_length = data["left_hand_x"].shape[0]
-
+        
         tempo_data = compute_tempo_for_segments(segment_ax, fps, window_size, hop_size, tempi_range, novelty_length)
 
         for seg_key, info in tempo_data.items():
