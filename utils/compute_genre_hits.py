@@ -18,14 +18,14 @@ def save_pickle(filepath, data):
     with open(filepath, "wb") as f:
         pickle.dump(data, f)
         
-def compute_genre_hits(mode, anchor_type, method, output_path):
+def compute_genre_hits(df_seg, mode, anchor_type, method, output_path):
 
     read_dir = os.path.join(output_path, "eval_data", method)
 
-    fname = f"{anchor_type}_{mode}.pkl"
-    fpath = os.path.join(read_dir, fname)
+    # fname = f"{anchor_type}_{mode}.pkl"
+    # fpath = os.path.join(read_dir, fname)
 
-    df_eval = pd.read_pickle(fpath)
+    # df_eval = pd.read_pickle(fpath)
 
     fpath1 = os.path.join(output_path, anchor_type, "left_hand_y_uni.pkl")    # For reference only
     df_ref = pd.read_pickle(fpath1)
@@ -35,7 +35,7 @@ def compute_genre_hits(mode, anchor_type, method, output_path):
     final_df["total"] = final_df["dance_genre"].map(genre_Tcount)
 
     # Convert hit indices to list (in case NumPy array)
-    hit_indices = df_eval["hit_idx"].tolist()
+    hit_indices = df_seg["hit_idx"].tolist()
 
     # Extract DataFrame of hits
     hit_df = df_ref.iloc[hit_indices]

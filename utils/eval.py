@@ -1,10 +1,11 @@
 
 
 import os
+import json
 import pickle 
-import pandas as pd
 import numpy as np
-
+import pandas as pd
+from collections import defaultdict
 
 
 
@@ -75,9 +76,17 @@ def compute_dts(
     # hits ----------------------------------------------------------
     hit_mask = dts > 0.0          # inside ±tau band
     hit_idx = np.nonzero(hit_mask)[0]
-    ref_hit_bpm = ref_bpm[hit_idx]
+    hit_ref_bpm = ref_bpm[hit_idx]
     
-    return accuracy, hit_idx, ref_hit_bpm
+    json_data = {
+        "accuracy": accuracy,
+        "hit_idx": hit_idx,
+        "hit_ref_bpm": hit_ref_bpm,
+        "dts": dts
+    }
+    
+    
+    return accuracy, hit_idx, hit_ref_bpm, dts
 
 ##-------------------------------------------------
 ## Evaluation mmethod best of n
@@ -153,9 +162,17 @@ def compute_dts_bon(
     # hits ----------------------------------------------------------
     hit_mask = dts > 0.0          # inside ±tau band
     hit_idx = np.nonzero(hit_mask)[0]
-    ref_hit_bpm = ref_bpm[hit_idx]
+    hit_ref_bpm = ref_bpm[hit_idx]
     
-    return accuracy, hit_idx, ref_hit_bpm, chosen
+    json_data = {
+        "accuracy": accuracy,
+        "hit_idx": hit_idx,
+        "hit_ref_bpm": hit_ref_bpm,
+        "hit_selctd_bpm": chosen,
+        "dts": dts
+    }
+    
+    return accuracy, hit_idx, hit_ref_bpm, chosen
 
 
 
@@ -183,12 +200,11 @@ def evaluation_single(a, b, mode, anchor_type, tolerance=0.13):
                     "bothhand_y_bothfoot_y_torso_y",
                     ] 
     
-    score_data = {}
+
     json_data = {}
+    json_data["bpm_median"] = {}
     output_path = f"./tempo_estimation_output/tempo_{a}_{b}/"
 
-    score_data["bpm_median"] = {}
-    json_data["bpm_median"] = {}
     
     for idx, f_name in enumerate(segment_keys):
         
@@ -196,11 +212,19 @@ def evaluation_single(a, b, mode, anchor_type, tolerance=0.13):
         df_ax = pd.read_pickle(f_path)
 
         ref = df_ax["music_tempo"].to_numpy()
-        dts_acc, hit_idx, ref_hit_bpm = compute_dts(ref, np.asarray(df_ax["bpm_median"]), tau=tolerance, mode = "one")
+        dts_data = compute_dts(ref, np.asarray(df_ax["bpm_median"]), tau=tolerance, mode = "one")
         
-        json_data["bpm_median"][f_name] = {"accuracy": np.round(dts_acc, 2),
+        accuracy     = dts_data["accuracy"]
+        dts          = dts_data["dts"]
+        hit_idx      = dts_data["hit_idx"]
+        hit_ref_bpm  = dts_data["hit_ref_bpm"]
+        
+        
+        json_data["bpm_median"][f_name] = {"accuracy": np.round(accuracy, 2),
+                                            "dts": dts,
                                             "hit_index": hit_idx,
-                                            "ref_hit_bpm": ref_hit_bpm}
+                                            "ref_hit_bpm": hit_ref_bpm,
+                                            }
                             
 
     #### Save the score data to a pickle file
@@ -209,7 +233,7 @@ def evaluation_single(a, b, mode, anchor_type, tolerance=0.13):
     
     fname = f"{anchor_type}_{mode}.pkl"
     fpath = os.path.join(save_dir, fname)
-    save_to_pickle(fpath, score_data)
+    save_to_pickle(fpath, json_data)
     
     return json_data
 
@@ -241,12 +265,30 @@ def evaluation_multi_segment(anchor_type, mode, a, b, tolerance=0.13):
         file_path = os.path.join(anchor_dir, file_name)
         
         data = load_pickle(file_path)
-        ref  = data["music_tempo"].to_numpy()
-        accuracy, hit_idx, ref_hit_bpm = compute_dts(ref, data["gtempo"].to_numpy(),
+        ref_bpm  = data["music_tempo"].to_numpy()
+        best_seg_names = data["best_segment_name"].to_numpy()
+        dance_genre = data["dance_genre"].to_numpy()
+        fnames = data["filename"].to_numpy()
+        
+        
+        dts_data = compute_dts(ref_bpm, data["gtempo"].to_numpy(),
                                             tau=tolerance, mode="one")
         
+        accuracy     = dts_data["accuracy"]
+        dts          = dts_data["dts"]
+        hit_idx      = dts_data["hit_idx"]
+        hit_ref_bpm  = dts_data["hit_ref_bpm"]
+        
+        
+        hit_seg_names = best_seg_names[hit_idx]
+        hit_dance_genre = dance_genre[hit_idx]
+        hit_fname = fnames[hit_idx]
+     
+        
         acc[seg] = round(accuracy, 2)
-        json_data[seg] = {"acc": accuracy, "hit_idx": hit_idx, "ref_hit_bpm": ref_hit_bpm}
+        json_data[seg] = {"acc": accuracy, "dts": dts ,"hit_idx": hit_idx, 
+                          "hit_ref_bpm": hit_ref_bpm, "hit_seg_names": hit_seg_names,
+                          "hit_genres":hit_dance_genre, 'filename': hit_fname}
         
 
     #### Save the score data to a pickle file
@@ -261,60 +303,179 @@ def evaluation_multi_segment(anchor_type, mode, a, b, tolerance=0.13):
     return json_data
 
 
-
-###----------------------------------------------------------------------
-## Evaluation for best of n
-###----------------------------------------------------------------------
-
-def eval_best_of_n(segment_names, a, b, mode, anchor_type, tolerance=0.13):
+####
+def eval_best_of_n(segment_groups, a, b, mode, anchor_type, tolerance=0.13):
     """
-    Evaluate 'best-of-n' accuracy across multiple segments.
+    Evaluate 'best-of-n' accuracy across multiple segment combinations.
 
     Args:
-        segment_names (list[str]): List of segment names (e.g., ["both_hand_y", "both_foot_y", "torso_y"])
-        a, b (int/float): Tempo range parameters
-        mode (str): Mode name (e.g., "pos", "vel")
-        anchor_type (str): Anchor type (e.g., "anchor_zero", "anchor_peak")
-        tolerance (float): Allowed tempo deviation (default 0.13)
+        segment_groups (list[list[str]]): List of segment name lists.
+            e.g., [["both_hand_y", "both_foot_y"], ["both_hand_y", "both_foot_y", "torso_y"]]
+        a, b (int/float): Tempo range parameters.
+        mode (str): Mode name (e.g., "pos", "vel").
+        anchor_type (str): Anchor type (e.g., "anchor_zero", "anchor_peak").
+        tolerance (float): Allowed tempo deviation (default 0.13).
     """
     output_path = f"./tempo_estimation_output/tempo_{a}_{b}/"
-    score_data = {}
-    bpm_candidates = []
+    json_data = {}
 
-    # Load all DataFrames dynamically for each segment
-    dfs = []
-    for seg in segment_names:
-        fpath = os.path.join(output_path, anchor_type, f"{seg}_{mode}.pkl")
-        dfs.append(pd.read_pickle(fpath))
+    for seg_list in segment_groups:
+        # Load all DataFrames for the current segment combination
+        dfs = []
+        for seg in seg_list:
+            fpath = os.path.join(output_path, anchor_type, f"{seg}_{mode}.pkl")
+            if not os.path.exists(fpath):
+                print(f"Warning: File not found — {fpath}")
+                continue
+            dfs.append(pd.read_pickle(fpath))
 
-    # Assume all DataFrames are aligned (same rows for each recording)
-    num_rows = dfs[0].shape[0]
-    ref = dfs[0]["music_tempo"].to_numpy()  # Reference tempo (same across all)
+        if not dfs:
+            print(f"Skipping {seg_list}: no valid data files found.")
+            continue
 
-    # Build candidate BPM tuples across n segments
-    for i in range(num_rows):
-        bpm_tuple = tuple(df.iloc[i]["bpm_median"] for df in dfs)
-        bpm_candidates.append(bpm_tuple)
+        # Assume all DataFrames are aligned
+        num_rows = dfs[0].shape[0]
+        ref = dfs[0]["music_tempo"].to_numpy()
+        dance_genres = dfs[0]["dance_genre"].to_numpy()
 
-    # Compute best-of-n accuracy
-    acc, hit_idx, ref_hit_bpm, chosen = compute_dts_bon(ref, bpm_candidates, tau=tolerance, mode="many")
+        # Build candidate BPM tuples across n segments
+        bpm_candidates = [
+            tuple(df.iloc[i]["bpm_median"] for df in dfs)
+            for i in range(num_rows)
+        ]
 
-    # Save results
-    json_data = {
-        "accuracy": acc,
-        "hit_idx": hit_idx,
-        "hit_ref_bpm": ref_hit_bpm,
-        "chosen_candidated_bpm": chosen,
-    }
+        # Compute best-of-n accuracy
+        dts_data = compute_dts_bon(
+                                                ref, bpm_candidates, tau=tolerance, mode="many"
+                                            )
+        
+        accuracy     = dts_data["accuracy"]
+        dts          = dts_data["dts"]
+        hit_idx      = dts_data["hit_idx"]
+        hit_ref_bpm  = dts_data["hit_ref_bpm"]
+        hit_selctd_bpm  = dts_data["hit_selctd_bpm"]
+        
 
+        hit_dance_genres = dance_genres[hit_idx]
+        
+        # Create merged segment name
+        merge_seg_names = "_".join(seg_list)
+
+        # Store results
+        json_data[merge_seg_names] = {
+            "accuracy": accuracy,
+            "dts": dts,
+            "hit_idx": hit_idx,
+            "hit_ref_bpm": hit_ref_bpm,
+            "hit_genres": hit_dance_genres,
+            "hit_selctd_bpm": hit_selctd_bpm,
+        }
+
+    # Save results to pickle
     save_dir = os.path.join(output_path, "eval_data", "best_of_n")
     os.makedirs(save_dir, exist_ok=True)
-    
     fname = f"{anchor_type}_{mode}.pkl"
     fpath = os.path.join(save_dir, fname)
     save_to_pickle(fpath, json_data)
 
     return json_data
+
+
+
+# --- Load genre mapping -------------------------------------------------
+with open("genre_symbols_mapping.json", "r") as file:
+    genre_id_to_name = json.load(file)
+
+with open("genreID_count_mapping.json", "r") as file:
+    genre_Tcount = json.load(file)
+
+
+def find_body_contribution_best_of_n(chosen, hit_genres_id):
+    # --- Map genres only for successful hits -------------------------------
+    genre_part_map = defaultdict(list)
+
+    # Iterate only over correct hits
+    for hit_idx, genre_id in enumerate(hit_genres_id):
+        # The same index in `chosen` corresponds to a correct hit
+        bpm, part = chosen[hit_idx]
+        genre = genre_id_to_name[str(genre_id)]  # ensure JSON string keys
+        genre_part_map[genre].append(part)
+
+    # --- Convert to DataFrame ----------------------------------------------
+    genre_part_df = pd.DataFrame([
+        {"genre": genre, "body_part": part}
+        for genre, parts in genre_part_map.items()
+        for part in parts
+    ])
+
+    # --- Count frequency per genre -----------------------------------------
+    part_counts = (
+        genre_part_df.groupby(["genre", "body_part"])
+        .size()
+        .reset_index(name="count")
+        .sort_values(["genre", "count"], ascending=[True, False])
+    )
+
+
+    # --- Normalize by total sequences per genre ----------------------------
+    # genre_Tcount_named = {genre_id_to_name [k]: v for k, v in genre_Tcount.items()}
+    # part_counts["total_per_genre"] = part_counts["genre"].map(genre_Tcount_named)
+    # part_counts["percentage"] = (part_counts["count"] / part_counts["total_per_genre"] * 100).round(2)
+
+
+    # --- Normalize by total hits per genre (not total sequences) ----------
+    genre_totals = part_counts.groupby("genre")["count"].transform("sum")
+    part_counts["percentage"] = (part_counts["count"] / genre_totals * 100).round(2)
+
+    return part_counts
+
+
+
+def find_body_contribution_multi(hit_genres_multi, hit_segment_names):
+    """
+    Compute per-genre body-part contribution among correctly estimated tempos.
+    
+    Args:
+        hit_genres_multi (list): List of genre IDs for correct hits.
+        hit_segment_names (list): List of segment names (same length as hit_genres_multi).
+        genre_id_to_name (dict): Mapping from genre ID (e.g., 'gHO') to readable name ('House').
+
+    Returns:
+        pd.DataFrame: Columns = ['genre', 'body_part', 'count', 'percentage']
+    """
+
+    # --- Map segments to genres for correct hits --------------------------
+    genre_part_map = defaultdict(list)
+    for genre_id, seg_name in zip(hit_genres_multi, hit_segment_names):
+        genre = genre_id_to_name[str(genre_id)]  # ensure key type consistency
+        genre_part_map[genre].append(seg_name)
+
+    # --- Build DataFrame --------------------------------------------------
+    genre_part_df = pd.DataFrame([
+        {"genre": genre, "body_part": seg}
+        for genre, seg_list in genre_part_map.items()
+        for seg in seg_list
+    ])
+
+    # --- Count frequency per genre ---------------------------------------
+    part_counts = (
+        genre_part_df.groupby(["genre", "body_part"])
+        .size()
+        .reset_index(name="count")
+        .sort_values(["genre", "count"], ascending=[True, False])
+    )
+    
+    # --- Normalize by total sequences per genre ----------------------------
+    # genre_Tcount_named = {genre_id_to_name [k]: v for k, v in genre_Tcount.items()}
+    # part_counts["total_per_genre"] = part_counts["genre"].map(genre_Tcount_named)
+    # part_counts["percentage"] = (part_counts["count"] / part_counts["total_per_genre"] * 100).round(2)
+
+    # --- Normalize by total hits per genre -------------------------------
+    genre_totals = part_counts.groupby("genre")["count"].transform("sum")
+    part_counts["percentage"] = (part_counts["count"] / genre_totals * 100).round(2)
+
+    return part_counts
+
 
 
 
