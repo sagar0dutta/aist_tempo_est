@@ -15,8 +15,7 @@ def compute_dts(
     ref_bpm,
     estimated_bpm,
     tau=0.13,
-    mode="one"
-):
+    ):
     """
     Continuous Dance-Tempo Score (DTS), with support for
     either single estimates (mode="one") or multiple
@@ -32,9 +31,7 @@ def compute_dts(
                         is an iterable of candidate BPMs.
     tau : float, optional
         Tolerance in octaves (0.06 ≈ 4 %).
-    mode : {"one", "many"} 
-        “one”: treat `estimated_bpm` as a flat sequence.
-        “many”: pick, for each i, the candidate closest to ref_bpm[i]. For best of two
+
 
     Returns
     -------
@@ -48,23 +45,23 @@ def compute_dts(
     ref_bpm = np.asarray(ref_bpm, dtype=float)
 
     # select a single estimate per index if needed
-    if mode == "many":
-        chosen = np.array([
-            min(cands, key=lambda b: min(
-            abs(b - ref_bpm[i]),
-            abs(b - 0.5 * ref_bpm[i]),
-            abs(b - 2.0 * ref_bpm[i])
-        ))
-        for i, cands in enumerate(estimated_bpm)
-        ], dtype=float)
+    # if mode == "many":
+    #     chosen = np.array([
+    #         min(cands, key=lambda b: min(
+    #         abs(b - ref_bpm[i]),
+    #         abs(b - 0.5 * ref_bpm[i]),
+    #         abs(b - 2.0 * ref_bpm[i])
+    #     ))
+    #     for i, cands in enumerate(estimated_bpm)
+    #     ], dtype=float)
     
-    elif mode == "one":
-        chosen = np.asarray(estimated_bpm, dtype=float)
-    else:
-        raise ValueError(f"Unknown mode: {mode!r}. Use 'one' or 'many'.")
+    # elif mode == "one":
+    #     chosen = np.asarray(estimated_bpm, dtype=float)
+    # else:
+    #     raise ValueError(f"Unknown mode: {mode!r}. Use 'one' or 'many'.")
 
     # DTS core ------------------------------------------------------
-    e = np.log2(chosen / ref_bpm)
+    e = np.log2(estimated_bpm / ref_bpm)
     # distance from nearest of -1, 0, +1
     d = np.abs(e[:, None] - np.array([-1.0, 0.0, 1.0])).min(axis=1)
     # clip by tolerance and convert to score
@@ -86,7 +83,7 @@ def compute_dts(
     }
     
     
-    return accuracy, hit_idx, hit_ref_bpm, dts
+    return json_data
 
 ##-------------------------------------------------
 ## Evaluation mmethod best of n
@@ -96,8 +93,7 @@ def compute_dts_bon(
     ref_bpm,
     estimated_bpm,
     tau=0.13,
-    mode="one"
-):
+    ):
     """
     Continuous Dance-Tempo Score (DTS), with support for
     either single estimates (mode="one") or multiple
@@ -113,9 +109,7 @@ def compute_dts_bon(
                         is an iterable of candidate BPMs.
     tau : float, optional
         Tolerance in octaves (0.06 ≈ 4 %).
-    mode : {"one", "many"} 
-        “one”: treat `estimated_bpm` as a flat sequence.
-        “many”: pick, for each i, the candidate closest to ref_bpm[i]. For best of two
+    
 
     Returns
     -------
@@ -130,23 +124,23 @@ def compute_dts_bon(
 
     body_parts = ["hand", "foot", "torso"]
 
-    if mode == "many":
-        chosen = []
-        for i, cands in enumerate(estimated_bpm):  # e.g. (bpm_hand, bpm_foot, bpm_torso)
-            ref = ref_bpm[i]
-            diffs = [
-                min(abs(b - ref), abs(b - 0.5 * ref), abs(b - 2.0 * ref))
-                for b in cands
-            ]
-            idx_min = int(np.argmin(diffs))  # index of best match
-            chosen_bpm = cands[idx_min]
-            chosen_part = body_parts[idx_min]
-            chosen.append((chosen_bpm, chosen_part))
+    # if mode == "many":
+    chosen = []
+    for i, cands in enumerate(estimated_bpm):  # e.g. (bpm_hand, bpm_foot, bpm_torso)
+        ref = ref_bpm[i]
+        diffs = [
+            min(abs(b - ref), abs(b - 0.5 * ref), abs(b - 2.0 * ref))
+            for b in cands
+        ]
+        idx_min = int(np.argmin(diffs))  # index of best match
+        chosen_bpm = cands[idx_min]
+        chosen_part = body_parts[idx_min]
+        chosen.append((chosen_bpm, chosen_part))
 
-    elif mode == "one":
-        chosen = [(float(b), None) for b in np.asarray(estimated_bpm, dtype=float)]
-    else:
-        raise ValueError(f"Unknown mode: {mode!r}. Use 'one' or 'many'.")
+    # elif mode == "one":
+    #     chosen = [(float(b), None) for b in np.asarray(estimated_bpm, dtype=float)]
+    # else:
+    #     raise ValueError(f"Unknown mode: {mode!r}. Use 'one' or 'many'.")
 
     chosen_bpm = np.array([c[0] for c in chosen], dtype=float)
     # DTS core ------------------------------------------------------
@@ -172,7 +166,7 @@ def compute_dts_bon(
         "dts": dts
     }
     
-    return accuracy, hit_idx, hit_ref_bpm, chosen
+    return json_data
 
 
 
@@ -212,7 +206,7 @@ def evaluation_single(a, b, mode, anchor_type, tolerance=0.13):
         df_ax = pd.read_pickle(f_path)
 
         ref = df_ax["music_tempo"].to_numpy()
-        dts_data = compute_dts(ref, np.asarray(df_ax["bpm_median"]), tau=tolerance, mode = "one")
+        dts_data = compute_dts(ref, np.asarray(df_ax["bpm_median"]), tau=tolerance)
         
         accuracy     = dts_data["accuracy"]
         dts          = dts_data["dts"]
@@ -271,8 +265,7 @@ def evaluation_multi_segment(anchor_type, mode, a, b, tolerance=0.13):
         fnames = data["filename"].to_numpy()
         
         
-        dts_data = compute_dts(ref_bpm, data["gtempo"].to_numpy(),
-                                            tau=tolerance, mode="one")
+        dts_data = compute_dts(ref_bpm, data["gtempo"].to_numpy(), tau=tolerance)
         
         accuracy     = dts_data["accuracy"]
         dts          = dts_data["dts"]
@@ -345,9 +338,7 @@ def eval_best_of_n(segment_groups, a, b, mode, anchor_type, tolerance=0.13):
         ]
 
         # Compute best-of-n accuracy
-        dts_data = compute_dts_bon(
-                                                ref, bpm_candidates, tau=tolerance, mode="many"
-                                            )
+        dts_data = compute_dts_bon(ref, bpm_candidates, tau=tolerance)
         
         accuracy     = dts_data["accuracy"]
         dts          = dts_data["dts"]
@@ -368,7 +359,7 @@ def eval_best_of_n(segment_groups, a, b, mode, anchor_type, tolerance=0.13):
             "hit_idx": hit_idx,
             "hit_ref_bpm": hit_ref_bpm,
             "hit_genres": hit_dance_genres,
-            "hit_selctd_bpm": hit_selctd_bpm,
+            "hit_selected_bpm": hit_selctd_bpm,
         }
 
     # Save results to pickle
