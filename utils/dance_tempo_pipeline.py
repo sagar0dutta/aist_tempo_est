@@ -328,36 +328,67 @@ def build_multi_segment(segment_ax):
             "segments": [segment_ax["both_hand_y"], segment_ax["both_foot_y"]],
             "names": ["both_hand_y", "both_foot_y"]
         },
-        'leftfoot_xy_rightfoot_xy': {
-            "segments": [segment_ax["leftfoot_xy"], segment_ax["rightfoot_xy"]],
-            "names": ["leftfoot_xy", "rightfoot_xy"]
+        
+        'left_hand_x_right_hand_x': {
+            "segments": [segment_ax["left_hand_x"], segment_ax["right_hand_x"]],
+            "names": ["left_hand_x", "right_hand_x"]
         },
-        'left_foot_res_right_foot_res': {
-            "segments": [segment_ax["left_foot_resultant"], segment_ax["right_foot_resultant"]],
-            "names": ["left_foot_resultant", "right_foot_resultant"]
+        
+        'left_hand_y_right_hand_y': {
+            "segments": [segment_ax["left_hand_y"], segment_ax["right_hand_y"]],
+            "names": ["left_hand_y", "right_hand_y"]
         },
-        'lefthand_xy_righthand_xy': {
-            "segments": [segment_ax["lefthand_xy"], segment_ax["righthand_xy"]],
-            "names": ["lefthand_xy", "righthand_xy"]
+        
+        'left_foot_x_right_foot_x': {
+            "segments": [segment_ax["left_foot_x"], segment_ax["right_foot_x"]],
+            "names": ["left_foot_x", "right_foot_x"]
         },
+        
+        'left_foot_y_right_foot_y': {
+            "segments": [segment_ax["left_foot_y"], segment_ax["right_foot_y"]],
+            "names": ["left_foot_y", "right_foot_y"]
+        },
+        
         'left_hand_res_right_hand_res': {
             "segments": [segment_ax["left_hand_resultant"], segment_ax["right_hand_resultant"]],
-            "names": ["left_hand_resultant", "right_hand_resultant"]
+            "names": ["left_hand_res", "right_hand_res"]
         },
-        'bothfoot_x_bothfoot_y': {
-            "segments": [segment_ax["both_foot_x"], segment_ax["both_foot_y"]],
-            "names": ["both_foot_x", "both_foot_y"]
+        
+        'left_foot_res_right_foot_res': {
+            "segments": [segment_ax["left_foot_resultant"], segment_ax["right_foot_resultant"]],
+            "names": ["left_foot_res", "right_foot_res"]
         },
-        'bothhand_x_bothfoot_x': {
-            "segments": [segment_ax["both_hand_x"], segment_ax["both_foot_x"]],
-            "names": ["both_hand_x", "both_foot_x"]
-        },
-        'bothhand_x_bothhand_y': {
-            "segments": [segment_ax["both_hand_x"], segment_ax["both_hand_y"]],
-            "names": ["both_hand_x", "both_hand_y"]
-        },
-        'both_hand_res_both_foot_res': {
-            "segments": [segment_ax["both_hand_resultant"], segment_ax["both_foot_resultant"]],
-            "names": ["both_hand_resultant", "both_foot_resultant"]
-        }
+        
+        # 'leftfoot_xy_rightfoot_xy': {
+        #     "segments": [segment_ax["leftfoot_xy"], segment_ax["rightfoot_xy"]],
+        #     "names": ["leftfoot_xy", "rightfoot_xy"]
+        # },
+        # 'left_foot_res_right_foot_res': {
+        #     "segments": [segment_ax["left_foot_resultant"], segment_ax["right_foot_resultant"]],
+        #     "names": ["left_foot_resultant", "right_foot_resultant"]
+        # },
+        # 'lefthand_xy_righthand_xy': {
+        #     "segments": [segment_ax["lefthand_xy"], segment_ax["righthand_xy"]],
+        #     "names": ["lefthand_xy", "righthand_xy"]
+        # },
+        # 'left_hand_res_right_hand_res': {
+        #     "segments": [segment_ax["left_hand_resultant"], segment_ax["right_hand_resultant"]],
+        #     "names": ["left_hand_resultant", "right_hand_resultant"]
+        # },
+        # 'bothfoot_x_bothfoot_y': {
+        #     "segments": [segment_ax["both_foot_x"], segment_ax["both_foot_y"]],
+        #     "names": ["both_foot_x", "both_foot_y"]
+        # },
+        # 'bothhand_x_bothfoot_x': {
+        #     "segments": [segment_ax["both_hand_x"], segment_ax["both_foot_x"]],
+        #     "names": ["both_hand_x", "both_foot_x"]
+        # },
+        # 'bothhand_x_bothhand_y': {
+        #     "segments": [segment_ax["both_hand_x"], segment_ax["both_hand_y"]],
+        #     "names": ["both_hand_x", "both_hand_y"]
+        # },
+        # 'both_hand_res_both_foot_res': {
+        #     "segments": [segment_ax["both_hand_resultant"], segment_ax["both_foot_resultant"]],
+        #     "names": ["both_hand_resultant", "both_foot_resultant"]
+        # }
     }

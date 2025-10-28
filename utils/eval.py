@@ -25,10 +25,7 @@ def compute_dts(
     ----------
     ref_bpm : array-like, shape (n,)
         Ground-truth musical tempo in BPM.
-    estimated_bpm : 
-        If mode="one": array-like, shape (n,)
-        If mode="many": iterable of length-n, each element
-                        is an iterable of candidate BPMs.
+    estimated_bpm : array-like, shape (n,)
     tau : float, optional
         Tolerance in octaves (0.06 ≈ 4 %).
 
@@ -44,26 +41,13 @@ def compute_dts(
     """
     ref_bpm = np.asarray(ref_bpm, dtype=float)
 
-    # select a single estimate per index if needed
-    # if mode == "many":
-    #     chosen = np.array([
-    #         min(cands, key=lambda b: min(
-    #         abs(b - ref_bpm[i]),
-    #         abs(b - 0.5 * ref_bpm[i]),
-    #         abs(b - 2.0 * ref_bpm[i])
-    #     ))
-    #     for i, cands in enumerate(estimated_bpm)
-    #     ], dtype=float)
-    
-    # elif mode == "one":
-    #     chosen = np.asarray(estimated_bpm, dtype=float)
-    # else:
-    #     raise ValueError(f"Unknown mode: {mode!r}. Use 'one' or 'many'.")
-
     # DTS core ------------------------------------------------------
     e = np.log2(estimated_bpm / ref_bpm)
     # distance from nearest of -1, 0, +1
     d = np.abs(e[:, None] - np.array([-1.0, 0.0, 1.0])).min(axis=1)
+    
+    # d = np.abs(e[:, None] - np.array([0.0])).min(axis=1) # compare with reference only
+    
     # clip by tolerance and convert to score
     d_clip = np.minimum(d, tau)
     dts    = 1.0 - d_clip / tau
@@ -240,30 +224,34 @@ def evaluation_multi_segment(anchor_type, mode, a, b, tolerance=0.13):
     root_dir = "./tempo_estimation_output"
     anchor_dir = os.path.join(root_dir, f"tempo_{a}_{b}", "multi", anchor_type)
     
-    multi_segment = [
-            "bothhand_y_bothfoot_y",
-            "leftfoot_xy_rightfoot_xy",
-            "left_foot_res_right_foot_res",
-            "lefthand_xy_righthand_xy",
-            "left_hand_res_right_hand_res",
-            "bothfoot_x_bothfoot_y",
-            "bothhand_x_bothfoot_x",
-            "bothhand_x_bothhand_y",
-            "both_hand_res_both_foot_res",
-            "bothhand_y_bothfoot_y_torso_y",
-            ]
+    # multi_segment = [
+    #         "bothhand_y_bothfoot_y",
+    #         "leftfoot_xy_rightfoot_xy",
+    #         "left_foot_res_right_foot_res",
+    #         "lefthand_xy_righthand_xy",
+    #         "left_hand_res_right_hand_res",
+    #         "bothfoot_x_bothfoot_y",
+    #         "bothhand_x_bothfoot_x",
+    #         "bothhand_x_bothhand_y",
+    #         "both_hand_res_both_foot_res",
+    #         "bothhand_y_bothfoot_y_torso_y",
+    #         ]
     
-    for seg in multi_segment:
+    dir_content = os.listdir(anchor_dir)
+    
+    for file_name in dir_content:
+        seg = file_name.removesuffix('.pkl')
 
-        file_name = f"{seg}_{mode}.pkl"
+        # file_name = f"{seg}_{mode}.pkl"
         file_path = os.path.join(anchor_dir, file_name)
         
         data = load_pickle(file_path)
         ref_bpm  = data["music_tempo"].to_numpy()
-        best_seg_names = data["best_segment_name"].to_numpy()
         dance_genre = data["dance_genre"].to_numpy()
         fnames = data["filename"].to_numpy()
         
+        best_seg_names = data["best_segment_name"].to_numpy()
+        best_anch_seq = data['best_anchor_seq'].to_numpy()
         
         dts_data = compute_dts(ref_bpm, data["gtempo"].to_numpy(), tau=tolerance)
         
@@ -276,11 +264,12 @@ def evaluation_multi_segment(anchor_type, mode, a, b, tolerance=0.13):
         hit_seg_names = best_seg_names[hit_idx]
         hit_dance_genre = dance_genre[hit_idx]
         hit_fname = fnames[hit_idx]
+        hit_anc_seq = best_anch_seq[hit_idx]
      
         
         acc[seg] = round(accuracy, 2)
         json_data[seg] = {"acc": accuracy, "dts": dts ,"hit_idx": hit_idx, 
-                          "hit_ref_bpm": hit_ref_bpm, "hit_seg_names": hit_seg_names,
+                          "hit_ref_bpm": hit_ref_bpm, "hit_seg_names": hit_seg_names, 'hit_anc_seq': hit_anc_seq,
                           "hit_genres":hit_dance_genre, 'filename': hit_fname}
         
 
