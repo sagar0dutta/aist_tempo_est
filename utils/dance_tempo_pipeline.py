@@ -26,6 +26,45 @@ def parse_filename(filename):
         "choreo_id": file_info[5].replace(".pkl", "")
     }
 
+######## For Ablation Studies ########
+def downsample_dict(data_dict, factor):
+    """Downsample all arrays in data_dict by an integer factor."""
+    if factor == 1:
+        return data_dict
+    return {k: v[::factor] for k, v in data_dict.items()}
+
+def apply_sparsity(arr, drop_rate):
+    arr = np.asarray(arr)
+    N = len(arr)
+
+    if drop_rate <= 0 or N < 3:
+        return arr
+
+    # random keep/drop
+    keep_mask = np.random.rand(N) > drop_rate
+
+    # must keep at least 3 points to avoid degenerate interpolation
+    if keep_mask.sum() < 3:
+        keep_idx = np.random.choice(N, size=3, replace=False)
+        keep_mask[keep_idx] = True
+
+    kept_idx = np.where(keep_mask)[0]
+
+    # --- 1D case ---
+    if arr.ndim == 1:
+        kept_vals = arr[keep_mask].reshape(-1)
+        return np.interp(np.arange(N), kept_idx, kept_vals)
+
+    # --- multi-D case (N,1), (N,D), etc.
+    out = np.zeros_like(arr)
+    for d in range(arr.shape[1]):
+        col = arr[:, d].reshape(-1)
+        kept_vals = col[keep_mask]
+        out[:, d] = np.interp(np.arange(N), kept_idx, kept_vals)
+
+    return out
+
+#############################################
 
 # -------------------------------------------------------------
 # 2. Data loading helpers
@@ -46,7 +85,31 @@ def load_marker_data(paths, key="sensor_onsets"):
         "torso_x": lp(paths["com"]["com_torso"]["ax0"]),
         "torso_y": lp(paths["com"]["com_torso"]["ax1"]),
     }
-
+    
+    # data = {
+    #     "left_hand_x": lp(paths["markers"]["left_wrist"]["ax0"]),
+    #     "left_hand_y": lp(paths["markers"]["left_wrist"]["ax1"]),
+    #     "right_hand_x": lp(paths["markers"]["right_wrist"]["ax0"]),
+    #     "right_hand_y": lp(paths["markers"]["right_wrist"]["ax1"]),
+    #     "left_foot_x": lp(paths["markers"]["left_ankle"]["ax0"]),
+    #     "left_foot_y": lp(paths["markers"]["left_ankle"]["ax1"]),
+    #     "right_foot_x": lp(paths["markers"]["right_ankle"]["ax0"]),
+    #     "right_foot_y": lp(paths["markers"]["right_ankle"]["ax1"]),
+    #     "torso_x": lp(paths["com"]["com_torso"]["ax0"]),
+    #     "torso_y": lp(paths["com"]["com_torso"]["ax1"]),
+    # }
+    # return downsample_dict(data, 2)
+    
+    # data1 = downsample_dict(data, 2)
+    
+    # Apply sparsity to each key
+    # drop_rate = 40   # set drop rate here for ablation study 10, 20, 40
+    # if drop_rate > 0:
+    #     for k in data1:
+    #         data1[k] = apply_sparsity(data1[k], drop_rate)
+    
+    
+    # return data1        # fps_factor:  1--60fps, 2--30fps, 3--20fps, 4--15fps
 
 # -------------------------------------------------------------
 # 3. Combine and filter onset sequences
@@ -202,8 +265,10 @@ def compute_tempo_for_multi_segments(multi_segment, fps, window_size, hop_size, 
         segment_names = seg_info["names"]
 
         for anchor in segments:
-            anchors.append(anchor)  # already binary/peak as you like
-            temp_ab, temp_raw, _, _ = compute_tempogram(anchor, fps, window_size, hop_size, tempi_range)
+            anchor_peak = binary_to_peak(anchor, peak_duration=0.1)
+            anchors.append(anchor_peak)  # already binary/peak as you like
+        
+            temp_ab, temp_raw, _, _ = compute_tempogram(anchor_peak, fps, window_size, hop_size, tempi_range)
             tempogram_ab_list.append(temp_ab)
             tempogram_raw_list.append(temp_raw)
 
@@ -228,13 +293,42 @@ def compute_tempo_for_multi_segments(multi_segment, fps, window_size, hop_size, 
                 if abs(best_corr) > abs(best_global["corr"]):
                     best_global.update({"freq": f, "corr": best_corr, "lag": best_lag})
 
-        
+
         # After best_global determined
         if best_global["freq"] is not None:
             best_index = test_frequencies.index(best_global["freq"])
             best_segment_name = segment_names[best_index]
             best_anchor_seq = anchors[best_index]
+            best_freq = best_global["freq"]
+             
+            # -------------------------------------------------
+            period_samples = fps / best_freq  # samples per cycle
+            n_cycles = int(np.ceil(len(best_anchor_seq) / period_samples))  # enough cycles
+            total_samples = int(n_cycles * period_samples)
+            
+            
+            sine = np.sin(2 * np.pi * best_freq * np.arange(int(2 * total_samples )) / fps)     # * len(best_anchor_seq)
+            sine -= np.mean(sine)
+            sine = np.clip(sine, 0, None)  # Half-wave rectification
+            
+            # Ensure both are numpy arrays
+            best_anchor_seq = np.asarray(best_anchor_seq).flatten()
+            best_anchor_seq -= np.mean(best_anchor_seq)
+            
+            # clean anchor sequence
+            # sine_best_lag = np.roll(sine, int(best_global["lag"]))
+            # cleaned_anchor_seq = sine_best_lag[:len(best_anchor_seq)] * best_anchor_seq
+            
+            # Cross-correlation
+            corr1 = np.correlate(best_anchor_seq, sine, mode='full')
+            lags = np.arange(-len(sine) + 1, len(best_anchor_seq))
+
+            best_lag = lags[np.argmax(corr1)]
+            aligned_pulse = np.roll(sine, best_lag)
+            ## -------------------------------------------------
+            
         else:
+            aligned_pulse = None
             best_segment_name = None
             best_anchor_seq = None
         
@@ -250,6 +344,7 @@ def compute_tempo_for_multi_segments(multi_segment, fps, window_size, hop_size, 
         tempo_data[seg_key] = {
             "gtempo": gtempo,
             'best_segment': best_segment_name,
+            'beat_pulse': aligned_pulse,
             'anchor_seq': best_anchor_seq,
             "per_anchor": per_anchor,    # contains "median_tempo", "magnitude", "phase", "complex"
             "alignment": {
@@ -293,7 +388,7 @@ def process_all_files_multi_segment(aist_filelist, anchor_type, mode, fps, windo
                     result[seg_key] = {k: [] for k in [
                         "filename", "dance_genre", "situation", "camera_id", "dancer_id",
                         "music_id", "choreo_id", "music_tempo", "gtempo", 'best_segment_name',
-                        "best_anchor_seq"
+                        "best_anchor_seq", "beat_pulse"
                     ]}
 
                 result[seg_key]["filename"].append(filename.replace(".pkl", ""))
@@ -303,6 +398,7 @@ def process_all_files_multi_segment(aist_filelist, anchor_type, mode, fps, windo
                 result[seg_key]["gtempo"].append(info["gtempo"])
                 result[seg_key]["best_segment_name"].append(info["best_segment"])
                 result[seg_key]["best_anchor_seq"].append(info["anchor_seq"])
+                result[seg_key]["beat_pulse"].append(info["beat_pulse"])
 
 
         count += 1
@@ -328,6 +424,15 @@ def build_multi_segment(segment_ax):
             "segments": [segment_ax["both_hand_y"], segment_ax["both_foot_y"]],
             "names": ["both_hand_y", "both_foot_y"]
         },
+        'bothhand_y_torso_y': {
+            "segments": [segment_ax["both_hand_y"], segment_ax["torso_y"]],
+            "names": ["both_hand_y", "torso_y"]
+        },
+        'bothfoot_y_torso_y': {
+            "segments": [segment_ax["both_foot_y"], segment_ax["torso_y"]],
+            "names": ["both_foot_y", "torso_y"]
+        },
+    
         
         'left_hand_x_right_hand_x': {
             "segments": [segment_ax["left_hand_x"], segment_ax["right_hand_x"]],

@@ -58,12 +58,17 @@ def compute_dts(
     hit_mask = dts > 0.0          # inside ±tau band
     hit_idx = np.nonzero(hit_mask)[0]
     hit_ref_bpm = ref_bpm[hit_idx]
+    hit_bpm = estimated_bpm[hit_idx]
+    hit_dts = dts[hit_idx]
     
     json_data = {
         "accuracy": accuracy,
+        "dts": hit_dts,
         "hit_idx": hit_idx,
+        "hit_bpm": hit_bpm,
         "hit_ref_bpm": hit_ref_bpm,
-        "dts": dts
+        'est_bpm': estimated_bpm,
+        'ref_bpm': ref_bpm,
     }
     
     
@@ -144,10 +149,10 @@ def compute_dts_bon(
     
     json_data = {
         "accuracy": accuracy,
+        "dts": dts,
         "hit_idx": hit_idx,
         "hit_ref_bpm": hit_ref_bpm,
         "hit_selctd_bpm": chosen,
-        "dts": dts
     }
     
     return json_data
@@ -195,12 +200,14 @@ def evaluation_single(a, b, mode, anchor_type, tolerance=0.13):
         accuracy     = dts_data["accuracy"]
         dts          = dts_data["dts"]
         hit_idx      = dts_data["hit_idx"]
+        hit_bpm      = dts_data["hit_bpm"]
         hit_ref_bpm  = dts_data["hit_ref_bpm"]
         
         
         json_data["bpm_median"][f_name] = {"accuracy": np.round(accuracy, 2),
                                             "dts": dts,
                                             "hit_index": hit_idx,
+                                            "hit_bpm": hit_bpm,
                                             "ref_hit_bpm": hit_ref_bpm,
                                             }
                             
@@ -218,11 +225,11 @@ def evaluation_single(a, b, mode, anchor_type, tolerance=0.13):
 ###----------------------------------------------------------------------
 ## Evaluation for multi segments
 ###----------------------------------------------------------------------
-def evaluation_multi_segment(anchor_type, mode, a, b, tolerance=0.13):
+def evaluation_multi_segment(anchor_type, mode, a, b, tolerance=0.13, output_dir = "./tempo_estimation_output"):
     acc = {}
     json_data = {}
-    root_dir = "./tempo_estimation_output"
-    anchor_dir = os.path.join(root_dir, f"tempo_{a}_{b}", "multi", anchor_type)
+    # root_dir = "./tempo_estimation_output"
+    anchor_dir = os.path.join(output_dir, f"tempo_{a}_{b}", "multi", anchor_type)
     
     # multi_segment = [
     #         "bothhand_y_bothfoot_y",
@@ -252,29 +259,35 @@ def evaluation_multi_segment(anchor_type, mode, a, b, tolerance=0.13):
         
         best_seg_names = data["best_segment_name"].to_numpy()
         best_anch_seq = data['best_anchor_seq'].to_numpy()
+        beat_pulse_arr = data['beat_pulse'].to_numpy()
         
         dts_data = compute_dts(ref_bpm, data["gtempo"].to_numpy(), tau=tolerance)
         
         accuracy     = dts_data["accuracy"]
         dts          = dts_data["dts"]
         hit_idx      = dts_data["hit_idx"]
+        hit_bpm      = dts_data["hit_bpm"]
         hit_ref_bpm  = dts_data["hit_ref_bpm"]
         
         
+        #------------------
         hit_seg_names = best_seg_names[hit_idx]
         hit_dance_genre = dance_genre[hit_idx]
         hit_fname = fnames[hit_idx]
         hit_anc_seq = best_anch_seq[hit_idx]
+        hit_beat_pulse = beat_pulse_arr[hit_idx]
+        
      
         
         acc[seg] = round(accuracy, 2)
-        json_data[seg] = {"acc": accuracy, "dts": dts ,"hit_idx": hit_idx, 
-                          "hit_ref_bpm": hit_ref_bpm, "hit_seg_names": hit_seg_names, 'hit_anc_seq': hit_anc_seq,
+        json_data[seg] = {"acc": accuracy, "dts": dts ,"hit_idx": hit_idx, "hit_bpm": hit_bpm, "hit_beat_pulse": hit_beat_pulse,
+                          "hit_ref_bpm": hit_ref_bpm, 'est_bpm': data["gtempo"].to_numpy(), 'ref_bpm': ref_bpm,
+                          "hit_seg_names": hit_seg_names, 'hit_anc_seq': hit_anc_seq,
                           "hit_genres":hit_dance_genre, 'filename': hit_fname}
         
 
     #### Save the score data to a pickle file
-    output_path = f"./tempo_estimation_output/tempo_{a}_{b}/"
+    output_path = os.path.join(output_dir, f"tempo_{a}_{b}")
     save_dir = os.path.join(output_path, "eval_data", "multi")
     os.makedirs(save_dir, exist_ok=True)
     

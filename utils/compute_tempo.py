@@ -250,13 +250,14 @@ def dance_tempo_estimation(tempogram_ab_list, tempogram_raw_list, fps, novelty_l
     hann_window = np.hanning(window_length)
     half_window_length = window_length // 2
     padded_curve_length = novelty_length + half_window_length
-    estimated_beat_pulse = np.zeros(padded_curve_length)
+    
 
     tempogram_data = []
     # gtempo_list = []
     for tempogram_ab, tempogram_raw in zip(tempogram_ab_list, tempogram_raw_list):
 
         num_frames = tempogram_raw.shape[1]
+        estimated_beat_pulse = np.zeros(padded_curve_length)
         bpm_list,complex_list, mag_list, phase_list = [], [], [], []
 
         for frame_idx in range(num_frames):
@@ -293,7 +294,8 @@ def dance_tempo_estimation(tempogram_ab_list, tempogram_raw_list, fps, novelty_l
             "bpm": bpm_list,
             "phase": phase_list,
             "complex": complex_list,
-            "median_tempo": np.median(bpm_list)
+            "median_tempo": np.median(bpm_list),
+            "beat_pulse": estimated_beat_pulse,
             })
         
         
